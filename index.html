@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ResumeAid — Match smarter, not harder</title>
+  <meta name="description"
+    content="ResumeAid uses AI to analyse your resume against live job listings and delivers an instant compatibility score. Upload your PDF or DOCX and get matched in seconds." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body id="app-body">
+
+  <!-- ─── SPLASH ──────────────────────────────────────────────── -->
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <div class="splash-logo-wrap">
+        <svg class="splash-icon" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="56" height="56" rx="14" fill="url(#sg)" />
+          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
+            stroke-linecap="round" />
+          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
+          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="sg" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#00B4A6" />
+              <stop offset="1" stop-color="#0097A7" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1 class="splash-name">ResumeAid</h1>
+      <p class="splash-tag">Match smarter, not harder</p>
+      <div class="splash-progress">
+        <div id="splash-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── APP SHELL ────────────────────────────────────────────── -->
+  <div id="app" class="app hidden">
+
+    <!-- Sidebar (desktop) / mobile header handled in CSS -->
+    <aside class="sidebar" id="sidebar">
+      <!-- Logo -->
+      <div class="sidebar-logo">
+        <svg class="logo-icon" viewBox="0 0 56 56" fill="none">
+          <rect width="56" height="56" rx="14" fill="url(#lg)" />
+          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
+            stroke-linecap="round" />
+          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
+          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#00B4A6" />
+              <stop offset="1" stop-color="#0097A7" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="logo-text">ResumeAid</span>
+      </div>
+
+      <!-- Nav links -->
+      <nav class="sidebar-nav" role="navigation" aria-label="Main navigation">
+        <button class="nav-item active" id="nav-upload" data-view="upload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span>Upload</span>
+        </button>
+        <button class="nav-item" id="nav-matches" data-view="matches">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+          <span>Matches</span>
+          <span class="nav-badge hidden" id="nav-badge">0</span>
+        </button>
+        <button class="nav-item" id="nav-resume" data-view="resume">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+          <span>Resume</span>
+        </button>
+        <button class="nav-item" id="nav-settings" data-view="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar footer -->
+      <div class="sidebar-footer">
+        <p class="sidebar-version">Version 1.0</p>
+      </div>
+    </aside>
+
+    <!-- Mobile top bar -->
+    <header class="mobile-header" id="mobile-header">
+      <div class="mobile-logo">
+        <svg width="28" height="28" viewBox="0 0 56 56" fill="none">
+          <rect width="56" height="56" rx="12" fill="url(#mhg)" />
+          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
+            stroke-linecap="round" />
+          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
+          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="mhg" x1="0" y1="0" x2="56" y2="56">
+              <stop stop-color="#00B4A6" />
+              <stop offset="1" stop-color="#0097A7" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>ResumeAid</span>
+      </div>
+      <span class="mobile-title" id="mobile-title">Upload</span>
+    </header>
+
+
+
+    <!-- Main content -->
+    <main class="main-content" id="main-content">
+
+      <!-- ═══════ VIEW: UPLOAD ═══════ -->
+      <section class="view active" id="view-upload">
+        <!-- Hero banner -->
+        <div class="upload-hero">
+          <div class="upload-hero-text">
+            <div class="hero-eyebrow">AI-Powered Job Matching</div>
+            <h1 class="hero-title">Find your perfect role — <span class="hero-accent">instantly</span></h1>
+            <p class="hero-subtitle">Upload your resume and we'll scan live job listings to score your compatibility
+              with open roles in real time.</p>
+            <div class="hero-stats">
+              <div class="stat"><span class="stat-num">10K+</span><span class="stat-lbl">Jobs Analysed</span></div>
+              <div class="stat-divider"></div>
+              <div class="stat"><span class="stat-num">94%</span><span class="stat-lbl">Match Accuracy</span></div>
+              <div class="stat-divider"></div>
+              <div class="stat"><span class="stat-num">&lt;60s</span><span class="stat-lbl">Avg. Response</span></div>
+            </div>
+          </div>
+          <div class="upload-hero-visual">
+            <!-- Floating card decorations -->
+            <div class="deco-card deco-card-1">
+              <div class="deco-score">87%</div>
+              <div class="deco-label">Match Score</div>
+            </div>
+            <div class="deco-card deco-card-2">
+              <div class="deco-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00B4A6" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <div class="deco-label">Resume Analysed</div>
+            </div>
+            <div class="deco-card deco-card-3">
+              <div class="deco-mini-bar">
+                <div style="width:78%"></div>
+              </div>
+              <div class="deco-mini-bar">
+                <div style="width:55%"></div>
+              </div>
+              <div class="deco-mini-bar">
+                <div style="width:91%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload card -->
+        <div class="upload-card-wrap">
+          <div class="upload-card">
+            <div class="upload-card-header">
+              <h2>Upload your resume</h2>
+              <p>Supported formats: PDF, DOC, DOCX &mdash; Max 10 MB</p>
+            </div>
+
+            <!-- Drop zone -->
+            <div class="drop-zone" id="drop-zone" tabindex="0" role="button"
+              aria-label="Click or drag to upload resume">
+              <div class="dz-graphic">
+                <div class="dz-circle">
+                  <svg width="36" height="36" viewBox="0 0 48 48" fill="none">
+                    <path d="M8 36V12a4 4 0 0 1 4-4h18l10 10v18a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4z" stroke="currentColor"
+                      stroke-width="2.2" stroke-linejoin="round" />
+                    <path d="M30 8v10h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                      stroke-linejoin="round" />
+                    <path d="M24 20v12M20 28l4 4 4-4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                      stroke-linejoin="round" />
+                  </svg>
+                </div>
+              </div>
+              <div class="dz-text">
+                <p class="dz-primary" id="dz-primary">Drag &amp; drop your file here</p>
+                <p class="dz-secondary">or <span class="dz-link">click to browse</span></p>
+              </div>
+              <input type="file" id="file-input" accept=".pdf,.doc,.docx" hidden />
+            </div>
+
+            <!-- Actions row -->
+            <div class="upload-actions">
+              <div class="file-pill hidden" id="file-pill">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span id="file-pill-name">resume.pdf</span>
+                <button class="file-pill-remove" id="file-pill-remove" aria-label="Remove file">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+              <button class="btn-analyse" id="btn-analyse" disabled>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+                Analyse resume
+              </button>
+            </div>
+
+            <!-- Loading state -->
+            <div class="analyse-loading hidden" id="analyse-loading">
+              <div class="loading-bar-track">
+                <div class="loading-bar-fill" id="loading-bar"></div>
+              </div>
+              <div class="loading-steps" id="loading-steps">
+                <div class="loading-step active" data-step="0">
+                  <div class="step-dot"></div><span>Parsing resume…</span>
+                </div>
+                <div class="loading-step" data-step="1">
+                  <div class="step-dot"></div><span>Scanning live listings…</span>
+                </div>
+                <div class="loading-step" data-step="2">
+                  <div class="step-dot"></div><span>Scoring matches…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- How it works -->
+          <div class="how-it-works">
+            <h3>How it works</h3>
+            <div class="steps-grid">
+              <div class="step-card">
+                <div class="step-num">01</div>
+                <h4>Upload</h4>
+                <p>Drop your resume in PDF or DOCX format. We parse your skills, experience, and education
+                  automatically.</p>
+              </div>
+              <div class="step-card">
+                <div class="step-num">02</div>
+                <h4>Analyse</h4>
+                <p>Our AI scans thousands of live job listings and checks compatibility with your profile in real time.
+                </p>
+              </div>
+              <div class="step-card">
+                <div class="step-num">03</div>
+                <h4>Match</h4>
+                <p>Get a ranked list of the best-fitting roles with a compatibility score and actionable insights for
+                  each.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ VIEW: MATCHES ═══════ -->
+      <section class="view" id="view-matches">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Your matches</h1>
+            <p class="view-subtitle" id="matches-subtitle">Upload your resume to see live job matches.</p>
+          </div>
+          <div class="view-header-actions hidden" id="matches-sort-wrap">
+            <select class="sort-select" id="matches-sort" aria-label="Sort matches">
+              <option value="score">Highest match</option>
+              <option value="title">A–Z by title</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div class="empty-state" id="matches-empty">
+          <div class="empty-visual">
+            <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="60" cy="60" r="60" fill="url(#ev1)" />
+              <path d="M30 80V40a8 8 0 0 1 8-8h28l20 20v28a8 8 0 0 1-8 8H38a8 8 0 0 1-8-8z"
+                fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" />
+              <path d="M66 32v20h20" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" />
+              <circle cx="82" cy="78" r="14" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.3)"
+                stroke-width="1.5" />
+              <path d="M88 84l4 4" stroke="rgba(255,255,255,0.5)" stroke-width="2" stroke-linecap="round" />
+              <defs>
+                <radialGradient id="ev1" cx="50%" cy="50%" r="50%">
+                  <stop stop-color="#1A3A5C" />
+                  <stop offset="1" stop-color="#0A1E38" />
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <h2>No matches yet</h2>
+          <p>Upload your resume on the Upload tab and we'll find the best-matching live roles for you.</p>
+          <button class="btn-outline" onclick="switchView('upload')">Go to Upload</button>
+        </div>
+
+        <!-- Match cards grid -->
+        <div class="matches-grid hidden" id="matches-grid"></div>
+      </section>
+
+      <!-- ═══════ VIEW: RESUME ═══════ -->
+      <section class="view" id="view-resume">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Your resume</h1>
+            <p class="view-subtitle">Parsed data from your most recent upload.</p>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div class="empty-state" id="resume-empty">
+          <div class="empty-visual">
+            <svg viewBox="0 0 120 120" fill="none">
+              <circle cx="60" cy="60" r="60" fill="url(#ev2)" />
+              <path d="M32 88V36a8 8 0 0 1 8-8h24l20 20v40a8 8 0 0 1-8 8H40a8 8 0 0 1-8-8z"
+                fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" />
+              <path d="M64 28v20h20" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" />
+              <path d="M44 52h32M44 60h24M44 68h28" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"
+                stroke-linecap="round" />
+              <defs>
+                <radialGradient id="ev2" cx="50%" cy="50%" r="50%">
+                  <stop stop-color="#1A3A5C" />
+                  <stop offset="1" stop-color="#0A1E38" />
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <h2>No resume data</h2>
+          <p>After you upload and analyse your resume, the parsed summary will appear here.</p>
+          <button class="btn-outline" onclick="switchView('upload')">Upload a resume</button>
+        </div>
+
+        <!-- Resume content -->
+        <div class="resume-content hidden" id="resume-content">
+          <!-- Inline Resume Check -->
+          <div class="resume-check-inline hidden" id="resume-check-inline">
+            <div class="rc-inline-header">
+              <div class="rc-inline-icon-wrap">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <h3 class="rc-inline-title">Resume Check</h3>
+                <p class="rc-inline-subtitle">A few things to improve</p>
+              </div>
+            </div>
+            <div class="rc-inline-issues" id="rc-inline-issues"></div>
+            <div class="rc-inline-skills-section hidden" id="rc-inline-skills-section">
+              <h4 class="rc-section-title">Suggested skills found in your text</h4>
+              <div class="chips-wrap" id="rc-inline-skills"></div>
+            </div>
+          </div>
+
+          <div class="resume-layout">
+            <!-- Left column: profile + skills -->
+            <div class="resume-sidebar">
+              <div class="profile-card">
+                <div class="profile-avatar" id="profile-avatar">?</div>
+                <h2 class="profile-name" id="profile-name">Unknown</h2>
+                <p class="profile-email" id="profile-email"></p>
+              </div>
+
+              <div class="info-card">
+                <h3 class="card-section-title">Detected Skills</h3>
+                <div class="chips-wrap" id="resume-skills"></div>
+              </div>
+            </div>
+
+            <!-- Right column: experience -->
+            <div class="resume-main-col">
+              <div class="info-card">
+                <h3 class="card-section-title">Experience Summary</h3>
+                <p class="experience-text" id="resume-experience">No experience information detected.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ VIEW: SETTINGS ═══════ -->
+      <section class="view" id="view-settings">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Settings</h1>
+            <p class="view-subtitle">Customise your ResumeAid experience.</p>
+          </div>
+        </div>
+
+        <div class="settings-layout">
+          <!-- Preferences group -->
+          <div class="settings-group">
+            <h3 class="settings-group-title">Preferences</h3>
+
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-info">
+                  <div class="settings-row-icon teal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p class="settings-row-label">Dark mode</p>
+                    <p class="settings-row-desc">Toggle between light and dark appearance</p>
+                  </div>
+                </div>
+                <label class="toggle" for="dark-mode-toggle">
+                  <input type="checkbox" id="dark-mode-toggle" />
+                  <span class="toggle-thumb"></span>
+                </label>
+              </div>
+
+              <div class="settings-divider"></div>
+
+              <div class="settings-row clickable" id="row-country" role="button" tabindex="0">
+                <div class="settings-row-info">
+                  <div class="settings-row-icon teal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <path
+                        d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p class="settings-row-label">Search country</p>
+                    <p class="settings-row-desc">Jobs are matched to listings in this country</p>
+                  </div>
+                </div>
+                <div class="settings-row-value-wrap">
+                  <span class="settings-row-value" id="country-display">United Kingdom</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- About group -->
+          <div class="settings-group">
+            <h3 class="settings-group-title">About</h3>
+            <div class="settings-card">
+              <div class="settings-row clickable" id="row-about" role="button" tabindex="0">
+                <div class="settings-row-info">
+                  <div class="settings-row-icon navy">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4M12 8h.01" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p class="settings-row-label">About ResumeAid</p>
+                    <p class="settings-row-desc">Version and app information</p>
+                  </div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </div>
+
+              <div class="settings-divider"></div>
+
+              <div class="settings-row clickable" id="row-privacy" role="button" tabindex="0">
+                <div class="settings-row-info">
+                  <div class="settings-row-icon navy">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                      stroke-linejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p class="settings-row-label">Privacy policy</p>
+                    <p class="settings-row-desc">How we handle your data</p>
+                  </div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+    <!-- Mobile top nav (visible on mobile only, sits below the header) -->
+    <nav class="mobile-nav" id="mobile-nav" role="navigation" aria-label="Mobile navigation">
+      <button class="mnav-btn active" data-view="upload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <span>Upload</span>
+      </button>
+      <button class="mnav-btn" data-view="matches">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+        <span>Matches</span>
+      </button>
+      <button class="mnav-btn" data-view="resume">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+        <span>Resume</span>
+      </button>
+      <button class="mnav-btn" data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ─── RESUME CHECK OVERLAY ──────────────────────────────────── -->
+  <div class="overlay hidden" id="overlay-resume-check">
+    <div class="overlay-backdrop" id="rc-backdrop"></div>
+    <div class="overlay-panel">
+      <div class="overlay-header">
+        <button class="btn-icon" id="rc-close" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+        <h2>Resume check</h2>
+        <div style="width:36px"></div>
+      </div>
+      <div class="overlay-body">
+        <div class="rc-badge">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          A few things to improve
+        </div>
+        <div id="rc-issues"></div>
+        <div id="rc-skills-section" class="hidden">
+          <h4 class="rc-section-title">Suggested skills found in your text</h4>
+          <div class="chips-wrap" id="rc-skills"></div>
+        </div>
+      </div>
+      <div class="overlay-footer">
+        <button class="btn-primary btn-full" id="btn-continue">
+          Continue to matches
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── MATCH DETAIL MODAL ────────────────────────────────────── -->
+  <div class="modal-backdrop hidden" id="modal-match">
+    <div class="modal" id="modal-match-box" role="dialog" aria-modal="true" aria-labelledby="modal-match-title">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-match-title">Match detail</h2>
+        <button class="btn-icon" id="modal-match-close" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="match-score-display">
+          <div class="score-ring-wrap">
+            <svg class="score-ring" viewBox="0 0 120 120">
+              <circle class="ring-track" cx="60" cy="60" r="50" />
+              <circle class="ring-fill" id="score-ring-fill" cx="60" cy="60" r="50" style="stroke-dashoffset: 314;" />
+            </svg>
+            <div class="score-center">
+              <span class="score-big" id="modal-score">—</span>
+              <span class="score-small">match</span>
+            </div>
+          </div>
+          <div class="match-score-meta">
+            <p class="match-score-company" id="modal-company"></p>
+            <p class="match-score-location" id="modal-location"></p>
+          </div>
+        </div>
+        <div class="modal-section">
+          <h4 class="modal-section-label">Summary</h4>
+          <p class="modal-comment" id="modal-comment">Match based on your resume and the role requirements.</p>
+        </div>
+        <div class="modal-section">
+          <h4 class="modal-section-label">Semantic similarity breakdown</h4>
+          <div class="breakdown-bars" id="modal-breakdown">
+            <div class="breakdown-row">
+              <div class="breakdown-label-row">
+                <span class="breakdown-dim">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 11l3 3L22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                  </svg>
+                  Skills Match
+                </span>
+                <span class="breakdown-pct" id="bd-skills-pct">—</span>
+              </div>
+              <div class="breakdown-track">
+                <div class="breakdown-fill skills-fill" id="bd-skills-fill"></div>
+              </div>
+            </div>
+            <div class="breakdown-row">
+              <div class="breakdown-label-row">
+                <span class="breakdown-dim">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="7" width="20" height="14" rx="2" />
+                    <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                  </svg>
+                  Experience Match
+                </span>
+                <span class="breakdown-pct" id="bd-exp-pct">—</span>
+              </div>
+              <div class="breakdown-track">
+                <div class="breakdown-fill exp-fill" id="bd-exp-fill"></div>
+              </div>
+            </div>
+            <div class="breakdown-row">
+              <div class="breakdown-label-row">
+                <span class="breakdown-dim">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4l3 3" />
+                  </svg>
+                  Role Title Match
+                </span>
+                <span class="breakdown-pct" id="bd-title-pct">—</span>
+              </div>
+              <div class="breakdown-track">
+                <div class="breakdown-fill title-fill" id="bd-title-fill"></div>
+              </div>
+            </div>
+          </div>
+          <!-- Matched skills chips -->
+          <div id="modal-matched-skills-wrap" class="hidden">
+            <p class="breakdown-skills-label">Directly matched keywords</p>
+            <div class="chips-wrap" id="modal-matched-skills"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a class="btn-primary" id="btn-view-listing" href="#" target="_blank" rel="noopener noreferrer">View listing
+          ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── COUNTRY MODAL ────────────────────────────────────────── -->
+  <div class="modal-backdrop hidden" id="modal-country">
+    <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="country-modal-title">
+      <div class="modal-header">
+        <h2 class="modal-title" id="country-modal-title">Search country</h2>
+        <button class="btn-icon" id="modal-country-close" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Enter the country where you want to find job listings.</p>
+        <input type="text" class="text-input" id="country-input" placeholder="e.g. United Kingdom, Australia" />
+      </div>
+      <div class="modal-footer modal-footer-row">
+        <button class="btn-ghost" id="country-cancel">Cancel</button>
+        <button class="btn-primary" id="country-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ABOUT MODAL ───────────────────────────────────────────── -->
+  <div class="modal-backdrop hidden" id="modal-about">
+    <div class="modal modal-sm about-modal" role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
+      <div class="about-icon-wrap">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <rect width="56" height="56" rx="16" fill="url(#abg)" />
+          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
+            stroke-linecap="round" />
+          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
+          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          <defs>
+            <linearGradient id="abg" x1="0" y1="0" x2="56" y2="56">
+              <stop stop-color="#00B4A6" />
+              <stop offset="1" stop-color="#0097A7" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h2 class="modal-title" id="about-modal-title">ResumeAid</h2>
+      <p class="modal-version">Version 1.0</p>
+      <p class="modal-tagline">Match smarter, not harder.</p>
+      <button class="btn-primary" id="about-ok">Got it</button>
+    </div>
+  </div>
+
+  <!-- ─── TOASTS ────────────────────────────────────────────────── -->
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
