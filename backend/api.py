@@ -11,7 +11,7 @@ ONE ENDPOINT does the real work:
           - resume: the PDF/DOCX file (required)
           - query: custom search text (optional â€” auto-derived from
             the resume's skills if omitted, same as pipeline.py)
-          - country: Adzuna country code (optional, default "us")
+          - country: country code for JSearch location filter (optional, default "us")
           - source: "all" | "philjobnet" | "adzuna" | "onlinejobs"
             (optional, default "all")
 
@@ -89,7 +89,7 @@ def analyze():
         return jsonify({"error": f"Unsupported file type '{extension}'. Only PDF and DOCX are accepted."}), 400
 
     query = request.form.get("query") or None
-    country = request.form.get("country", "us")
+    country = request.form.get("country", "ph")
     source = request.form.get("source", "all")
 
     # Save the upload to a real temp file â€” resume_parser.py's

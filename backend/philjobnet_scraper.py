@@ -197,7 +197,7 @@ def _sanitize_query(query):
 def search_jobs(query, max_results=10):
     """
     Searches PhilJobNet for `query`, returns a list of job dicts in
-    the SAME schema job_scraper.py (Adzuna) already uses — drop-in
+    the SAME schema job_scraper.py (JSearch) already uses — drop-in
     compatible with pipeline.py, matching_engine.py, etc. Only
     fetches the FIRST page of search results (pagination beyond that
     uses ASP.NET Web Forms postback, which is a separate, more

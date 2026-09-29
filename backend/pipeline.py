@@ -9,13 +9,12 @@ Connects resume_parser.py and matching_engine.py into one real flow:
     job description(s)     -->  rank_jobs_for_resume()  -->  ranked matches
 
 Job listings come from ALL THREE scrapers by default — philjobnet_scraper.py
-(PH postings), job_scraper.py (Adzuna), and onlinejobs_scraper.py
-(PH remote/VA postings) — 10 results from each, merged into one
-combined list, then ranked together by match percentage, so the
-final results freely mix all three sources based on actual fit
-rather than which source they came from. Use --source philjobnet,
---source adzuna, or --source onlinejobs to fetch from just one
-instead.
+(PH postings), job_scraper.py (Adzuna API, international/remote), and
+onlinejobs_scraper.py (PH remote/VA postings) — 10 results from each, merged
+into one combined list, then ranked together by match percentage, so the
+final results freely mix all three sources based on actual fit rather than
+which source they came from. Use --source philjobnet, --source adzuna, or
+--source onlinejobs to fetch from just one instead.
 
 The search query is derived AUTOMATICALLY from the resume's own
 detected skills — no need to type it manually. You can still override
@@ -57,10 +56,10 @@ except ImportError:
     PHILJOBNET_AVAILABLE = False
 
 try:
-    from job_scraper import search_jobs as search_adzuna
-    ADZUNA_AVAILABLE = True
+    from job_scraper import search_jobs as search_jsearch
+    JSEARCH_AVAILABLE = True
 except ImportError:
-    ADZUNA_AVAILABLE = False
+    JSEARCH_AVAILABLE = False
 
 try:
     from onlinejobs_scraper import search_jobs as search_onlinejobs
@@ -77,7 +76,7 @@ except ImportError:
 
 # Fallback placeholder listings — used only when no search query
 # could be derived (e.g. no skills detected at all), or when the real
-# job_scraper.py call fails (e.g. Adzuna credentials aren't set up
+# job_scraper.py call fails (e.g. RapidAPI key isn't set up
 # yet). Keeps this runnable at every stage of development instead of
 # hard-failing.
 SAMPLE_JOB_LISTINGS = [
@@ -115,7 +114,7 @@ SAMPLE_JOB_LISTINGS = [
 
 def build_search_query_from_resume(parsed_resume, max_skills=4):
     """
-    Auto-derives an Adzuna search query from the resume itself — this
+    Auto-derives a search query from the resume itself — this
     is what removes the need to type a query manually.
 
     Tries TWO approaches, in order:
@@ -161,12 +160,15 @@ def _try_fetch_philjobnet(query, max_results):
 
 
 def _try_fetch_adzuna(query, country, results_per_page):
-    """Fetches from Adzuna, returning [] (with a printed reason) on any failure — never raises."""
-    if not ADZUNA_AVAILABLE:
+    """Fetches from Adzuna API, returning [] (with a printed reason) on any failure — never raises.
+    Note: Adzuna does not support Philippines (ph); job_scraper.py automatically falls back to
+    'gb' (UK) for international/remote results when ph is passed.
+    """
+    if not JSEARCH_AVAILABLE:
         print("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
         return []
     try:
-        return search_adzuna(query, country=country, results_per_page=results_per_page)
+        return search_jsearch(query, country=country, results_per_page=results_per_page)
     except Exception as e:
         print(f"Couldn't fetch live Adzuna listings ({e})")
         return []
@@ -184,19 +186,21 @@ def _try_fetch_onlinejobs(query, max_results):
         return []
 
 
-def get_job_listings(search_query=None, country="us", source="all", results_per_source=10):
+def get_job_listings(search_query=None, country="ph", source="all", results_per_source=10):
     """
     Returns real job listings from the requested source:
-      - "all" / "both" (default; "both" kept as an alias from before
-        there were three sources): fetches results_per_source from
-        EACH of PhilJobNet, Adzuna, and OnlineJobs.ph, MERGES them
-        into one combined list. rank_jobs_for_resume then scores and
-        ranks the whole merged set together by match percentage — so
-        the final ranking can freely mix all three sources based on
-        actual fit, not on which source they came from.
-      - "philjobnet": PhilJobNet only, real PH postings
-      - "adzuna": Adzuna only, mainly for testing against non-PH data
-      - "onlinejobs": OnlineJobs.ph only, real PH remote/VA postings
+      - "all" / "both" (default): fetches results_per_source from EACH
+        of PhilJobNet, Adzuna, and OnlineJobs.ph, MERGES them into one
+        combined list. rank_jobs_for_resume then scores and ranks the
+        whole merged set together by match percentage — so the final
+        ranking can freely mix all three sources based on actual fit,
+        not on which source they came from.
+          • PhilJobNet  — PH government job board (PH-specific)
+          • Adzuna      — international/remote jobs (ph falls back to gb)
+          • OnlineJobs.ph — PH remote/VA postings (PH-specific)
+      - "philjobnet": PhilJobNet only
+      - "adzuna" / "jsearch": Adzuna only (international/remote)
+      - "onlinejobs": OnlineJobs.ph only
 
     Each source fails independently — if Adzuna credentials aren't
     set up, or one scraper's request fails, that source just
@@ -217,7 +221,8 @@ def get_job_listings(search_query=None, country="us", source="all", results_per_
                   f"{len(onlinejobs_jobs)} OnlineJobs.ph listings ({len(jobs)} total)")
     elif source == "onlinejobs":
         jobs = _try_fetch_onlinejobs(search_query, results_per_source)
-    elif source == "adzuna":
+    elif source in ("adzuna", "jsearch"):
+        # "jsearch" kept as alias so existing Android clients don't break
         jobs = _try_fetch_adzuna(search_query, country, results_per_source)
     else:
         jobs = _try_fetch_philjobnet(search_query, results_per_source)
@@ -336,7 +341,8 @@ if __name__ == "__main__":
     if parsed_args is None:
         print("Usage: python pipeline.py <path_to_resume.pdf_or_docx> [--query \"custom search\"] [--source all|philjobnet|adzuna|onlinejobs] [--country gb]")
         print("Without --query, the search term is auto-derived from the resume's own detected skills.")
-        print("Default source is 'all' (PhilJobNet + Adzuna + OnlineJobs.ph, merged and ranked together); --country only applies to the Adzuna portion.")
+        print("Default source is 'all' (PhilJobNet + Adzuna + OnlineJobs.ph, merged and ranked together).")
+        print("--country applies to the Adzuna source; 'ph' is not supported by Adzuna and auto-falls back to 'gb'.")
         sys.exit(1)
 
     resume_path, query, country_code, source = parsed_args
