@@ -1,47 +1,9 @@
 """
-Pipeline
---------
-Connects resume_parser.py and matching_engine.py into one real flow:
+Connects resume parsing and job matching into a single flow:
+resume -> parse_resume() -> rank_jobs_for_resume() -> matches.
 
-    resume file (PDF/DOCX)  -->  parse_resume()  -->  parsed dict
-                                                            |
-                                                            v
-    job description(s)     -->  rank_jobs_for_resume()  -->  ranked matches
-
-Job listings come from ALL THREE scrapers by default — philjobnet_scraper.py
-(PH postings), job_scraper.py (Adzuna API, international/remote), and
-onlinejobs_scraper.py (PH remote/VA postings) — 10 results from each, merged
-into one combined list, then ranked together by match percentage, so the
-final results freely mix all three sources based on actual fit rather than
-which source they came from. Use --source philjobnet, --source adzuna, or
---source onlinejobs to fetch from just one instead.
-
-The search query is derived AUTOMATICALLY from the resume's own
-detected skills — no need to type it manually. You can still override
-it with an explicit query if you want a specific search instead.
-Falls back to a few hardcoded placeholder listings if none of the
-sources are reachable, so this still runs at every stage of
-development.
-
-Before matching, resume_improver.py's diagnostics run automatically:
-if the resume has no dedicated Skills section, real O*NET-vocabulary
-matches found in the resume's body text get auto-applied as
-explicit_skills for this run (the original resume file is never
-modified) — this is what keeps a resume with no Skills section from
-degrading match quality the way it used to.
-
-Usage:
-    python pipeline.py path/to/resume.pdf
-    python pipeline.py path/to/resume.pdf --query "cashier"
-    python pipeline.py path/to/resume.pdf --source adzuna --query "python developer" --country gb
-
-Make sure resume_parser.py, matching_engine.py, philjobnet_scraper.py,
-job_scraper.py, onlinejobs_scraper.py, and resume_improver.py are all
-in the same folder as this file.
-
-Install dependencies first (covers every file's requirements):
-    pip install pdfplumber python-docx pytesseract pdf2image spacy sentence-transformers requests beautifulsoup4
-    python -m spacy download en_core_web_sm
+Defaults to fetching from all scrapers (PhilJobNet, Adzuna, OnlineJobs)
+and automatically derives search queries from resume skills.
 """
 
 import sys
@@ -74,11 +36,7 @@ except ImportError:
     IMPROVER_AVAILABLE = False
 
 
-# Fallback placeholder listings — used only when no search query
-# could be derived (e.g. no skills detected at all), or when the real
-# job_scraper.py call fails (e.g. RapidAPI key isn't set up
-# yet). Keeps this runnable at every stage of development instead of
-# hard-failing.
+# Fallback placeholder listings if APIs fail or return nothing.
 SAMPLE_JOB_LISTINGS = [
     {
         "title": "Frontend Developer",
@@ -114,26 +72,9 @@ SAMPLE_JOB_LISTINGS = [
 
 def build_search_query_from_resume(parsed_resume, max_skills=4):
     """
-    Auto-derives a search query from the resume itself — this
-    is what removes the need to type a query manually.
-
-    Tries TWO approaches, in order:
-      1. Semantic occupation inference (infer_job_title, in
-         matching_engine.py) — embeds the resume's skills/experience
-         and finds the closest-matching real O*NET occupation title
-         (e.g. "Software Developers"). This produces an actual job
-         title, which is what a search engine expects, rather than a
-         raw keyword dump.
-      2. Fallback: if that's not confident enough (or
-         occupation_profiles.json isn't set up), just joins the
-         resume's top listed skills as keywords instead (e.g. "Python
-         React SQL Docker") — cruder, but still automatic.
-
-    Returns (query_string, confidence_or_None) — confidence is the
-    inference similarity score when approach 1 was used, or None when
-    the skill-join fallback was used instead (there's no comparable
-    score for that). Returns (None, None) if neither approach found
-    anything usable.
+    Auto-derives search query using semantic occupation inference, 
+    falling back to joining top skills as keywords.
+    Returns (query_string, confidence_score).
     """
     inferred = infer_job_title(parsed_resume)
     if inferred:
@@ -148,7 +89,7 @@ def build_search_query_from_resume(parsed_resume, max_skills=4):
 
 
 def _try_fetch_philjobnet(query, max_results):
-    """Fetches from PhilJobNet, returning [] (with a printed reason) on any failure — never raises."""
+    """Fetches PhilJobNet listings, returning [] on failure."""
     if not PHILJOBNET_AVAILABLE:
         print("philjobnet_scraper.py not found or 'beautifulsoup4' not installed — skipping PhilJobNet")
         return []
@@ -160,10 +101,7 @@ def _try_fetch_philjobnet(query, max_results):
 
 
 def _try_fetch_adzuna(query, country, results_per_page):
-    """Fetches from Adzuna API, returning [] (with a printed reason) on any failure — never raises.
-    Note: Adzuna does not support Philippines (ph); job_scraper.py automatically falls back to
-    'gb' (UK) for international/remote results when ph is passed.
-    """
+    """Fetches Adzuna API listings, returning [] on failure."""
     if not JSEARCH_AVAILABLE:
         print("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
         return []
@@ -175,7 +113,7 @@ def _try_fetch_adzuna(query, country, results_per_page):
 
 
 def _try_fetch_onlinejobs(query, max_results):
-    """Fetches from OnlineJobs.ph, returning [] (with a printed reason) on any failure — never raises."""
+    """Fetches OnlineJobs.ph listings, returning [] on failure."""
     if not ONLINEJOBS_AVAILABLE:
         print("onlinejobs_scraper.py not found or 'beautifulsoup4' not installed — skipping OnlineJobs.ph")
         return []
@@ -188,25 +126,8 @@ def _try_fetch_onlinejobs(query, max_results):
 
 def get_job_listings(search_query=None, country="ph", source="all", results_per_source=10):
     """
-    Returns real job listings from the requested source:
-      - "all" / "both" (default): fetches results_per_source from EACH
-        of PhilJobNet, Adzuna, and OnlineJobs.ph, MERGES them into one
-        combined list. rank_jobs_for_resume then scores and ranks the
-        whole merged set together by match percentage — so the final
-        ranking can freely mix all three sources based on actual fit,
-        not on which source they came from.
-          • PhilJobNet  — PH government job board (PH-specific)
-          • Adzuna      — international/remote jobs (ph falls back to gb)
-          • OnlineJobs.ph — PH remote/VA postings (PH-specific)
-      - "philjobnet": PhilJobNet only
-      - "adzuna" / "jsearch": Adzuna only (international/remote)
-      - "onlinejobs": OnlineJobs.ph only
-
-    Each source fails independently — if Adzuna credentials aren't
-    set up, or one scraper's request fails, that source just
-    contributes zero results (with a printed reason) rather than
-    breaking the whole run. Falls back to placeholder listings only if
-    NO source returns anything at all (or the query is empty).
+    Returns aggregated job listings from the requested sources.
+    Defaults to returning results from all available scrapers.
     """
     if not search_query:
         return SAMPLE_JOB_LISTINGS
@@ -235,14 +156,8 @@ def get_job_listings(search_query=None, country="ph", source="all", results_per_
 
 def run_pipeline(resume_filepath, job_listings=None, search_query=None, country="us", source="all"):
     """
-    Full flow: parse the resume file, then rank it against a list of
-    job listings.
-
-    If job_listings is given directly, uses that. Otherwise, if
-    search_query is given, searches the chosen `source` with that
-    exact query. Otherwise (the default case), AUTOMATICALLY builds a
-    search query from the resume's own detected skills — no manual
-    typing needed.
+    Full pipeline: parses resume and ranks it against job listings.
+    Automatically derives a search query if none is provided.
     """
     print(f"Parsing resume: {resume_filepath}")
     parsed_resume = parse_resume(resume_filepath)
@@ -252,13 +167,7 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
     print(f"Email: {parsed_resume.get('email')}")
     print(f"Detected skills: {parsed_resume.get('skills')}")
 
-    # Run resume diagnostics BEFORE matching, and auto-apply suggested
-    # skills into explicit_skills if the resume has none — this is
-    # what makes the "no Skills section" problem stop hurting match
-    # quality for THIS run, without requiring the person to go edit
-    # and re-upload their actual resume file first. The original file
-    # on disk is never touched — this only affects parsed_resume in
-    # memory for this pipeline run.
+    # Run diagnostics and temporarily apply suggested skills for matching
     health_check = {"issues": [], "suggestions": [], "suggested_skills": []}
     if IMPROVER_AVAILABLE:
         issues, suggestions, suggested_skills = analyze_parsed_resume(parsed_resume, resume_filepath)
@@ -311,7 +220,7 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
 
 
 def _parse_args(argv):
-    """Minimal argument parser: positional resume path, optional --query, --country, --source flags."""
+    """Minimal CLI argument parser."""
     if len(argv) < 1:
         return None
     resume_path = argv[0]

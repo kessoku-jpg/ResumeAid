@@ -1,11 +1,9 @@
-/* ═══════════════════════════════════════════════════════
-   ResumeAid — app.js  (redesign)
-   ═══════════════════════════════════════════════════════ */
+// Main UI logic and API communication for ResumeAid
 'use strict';
 
 const API_BASE = 'http://localhost:5000';
 
-/* ── State ─────────────────────────────────────────────── */
+// Global application state
 const state = {
   lastResponse: null,
   selectedFile: null,
@@ -14,13 +12,11 @@ const state = {
   analysisController: null,
 };
 
-/* ── DOM shortcuts ──────────────────────────────────────── */
+// DOM element selectors
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
 
-/* ══════════════════════════════════════════════════════════
-   INIT
-   ══════════════════════════════════════════════════════════ */
+// Initialize app and apply user preferences
 function init() {
   // Dark mode: apply immediately, no flash
   applyDark(state.darkMode, false);
@@ -41,18 +37,16 @@ function init() {
   bindAll();
 }
 
-/* ══════════════════════════════════════════════════════════
-   BIND EVENTS
-   ══════════════════════════════════════════════════════════ */
+// Attach DOM event listeners
 function bindAll() {
 
-  /* Sidebar nav */
+  // Desktop sidebar navigation
   $$('.nav-item').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
 
-  /* Mobile top nav */
+  // Mobile top navigation
   $$('.mnav-btn').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
 
-  /* Drop zone */
+  // File upload drag-and-drop zone
   const dz = $('drop-zone');
   dz.addEventListener('click', () => $('file-input').click());
   dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file-input').click(); } });
@@ -64,25 +58,25 @@ function bindAll() {
   });
   $('file-input').addEventListener('change', () => { if ($('file-input').files[0]) onFile($('file-input').files[0]); });
 
-  /* Remove file */
+  // Clear selected file
   $('file-pill-remove').addEventListener('click', e => { e.stopPropagation(); clearFile(); });
 
-  /* Analyse */
+  // Start resume analysis
   $('btn-analyse').addEventListener('click', runAnalysis);
 
-  /* Resume check overlay */
+  // Resume health check overlay
   $('rc-close').addEventListener('click', () => closeOverlay('overlay-resume-check'));
   $('rc-backdrop').addEventListener('click', () => closeOverlay('overlay-resume-check'));
   $('btn-continue').addEventListener('click', () => closeOverlay('overlay-resume-check', () => switchView('matches')));
 
-  /* Match detail modal */
+  // Job match detail modal
   $('modal-match-close').addEventListener('click', () => closeModal('modal-match'));
   $('modal-match').addEventListener('click', e => { if (e.target === $('modal-match')) closeModal('modal-match'); });
 
-  /* Sort matches */
+  // Re-render matches on sort change
   $('matches-sort').addEventListener('change', renderMatches);
 
-  /* Settings */
+  // Settings panel toggles
   $('dark-mode-toggle').addEventListener('change', () => {
     state.darkMode = $('dark-mode-toggle').checked;
     localStorage.setItem('ra_dark', state.darkMode);
@@ -95,21 +89,19 @@ function bindAll() {
   $('row-privacy').addEventListener('click', () => toast('Privacy policy coming soon.'));
   $('row-privacy').addEventListener('keydown', e => { if (e.key === 'Enter') toast('Privacy policy coming soon.'); });
 
-  /* Country modal */
+  // Country selection modal
   $('country-cancel').addEventListener('click', () => closeModal('modal-country'));
   $('modal-country-close').addEventListener('click', () => closeModal('modal-country'));
   $('modal-country').addEventListener('click', e => { if (e.target === $('modal-country')) closeModal('modal-country'); });
   $('country-save').addEventListener('click', saveCountry);
   $('country-input').addEventListener('keydown', e => { if (e.key === 'Enter') saveCountry(); });
 
-  /* About modal */
+  // About info modal
   $('about-ok').addEventListener('click', () => closeModal('modal-about'));
   $('modal-about').addEventListener('click', e => { if (e.target === $('modal-about')) closeModal('modal-about'); });
 }
 
-/* ══════════════════════════════════════════════════════════
-   VIEW SWITCHING
-   ══════════════════════════════════════════════════════════ */
+// Handle navigating between UI sections
 const VIEW_TITLES = { upload: 'Upload', matches: 'Matches', resume: 'Resume', settings: 'Settings' };
 
 function switchView(viewId) {
@@ -131,9 +123,7 @@ function switchView(viewId) {
 // Export so HTML inline handlers can call it
 window.switchView = switchView;
 
-/* ══════════════════════════════════════════════════════════
-   FILE HANDLING
-   ══════════════════════════════════════════════════════════ */
+// Validate and handle selected files
 function onFile(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   const okTypes = ['application/pdf', 'application/msword',
@@ -161,9 +151,7 @@ function clearFile() {
   $('btn-analyse').disabled = true;
 }
 
-/* ══════════════════════════════════════════════════════════
-   ANALYSIS
-   ══════════════════════════════════════════════════════════ */
+// API communication and loading states
 function runAnalysis() {
   if (!state.selectedFile) { toast('Please select a file first.', true); return; }
 
@@ -242,9 +230,7 @@ function updateMatchBadge(count) {
   }
 }
 
-/* ══════════════════════════════════════════════════════════
-   RESUME CHECK OVERLAY
-   ══════════════════════════════════════════════════════════ */
+// Display resume issues and skill suggestions
 function showResumeCheck(data) {
   const hc = data.health_check;
   const issuesEl = $('rc-issues');
@@ -283,9 +269,7 @@ function showResumeCheck(data) {
   openOverlay('overlay-resume-check');
 }
 
-/* ══════════════════════════════════════════════════════════
-   MATCHES
-   ══════════════════════════════════════════════════════════ */
+// Render and sort job match cards
 function renderMatches() {
   const data = state.lastResponse;
   const grid = $('matches-grid');
@@ -365,9 +349,7 @@ function buildMatchCard(match, idx) {
   return card;
 }
 
-/* ══════════════════════════════════════════════════════════
-   MATCH DETAIL MODAL
-   ══════════════════════════════════════════════════════════ */
+// Display detailed job match breakdown and skills
 function showMatchDetail(match) {
   const pct = Math.round(scoreNum(match));
 
@@ -398,8 +380,8 @@ function showMatchDetail(match) {
   const bd = match.breakdown;
   const dims = [
     { fillId: 'bd-skills-fill', pctId: 'bd-skills-pct', value: bd?.skills_score },
-    { fillId: 'bd-exp-fill',    pctId: 'bd-exp-pct',    value: bd?.experience_score },
-    { fillId: 'bd-title-fill',  pctId: 'bd-title-pct',  value: bd?.title_score },
+    { fillId: 'bd-exp-fill', pctId: 'bd-exp-pct', value: bd?.experience_score },
+    { fillId: 'bd-title-fill', pctId: 'bd-title-pct', value: bd?.title_score },
   ];
 
   // Reset bars first (so re-opening animates cleanly)
@@ -427,7 +409,7 @@ function showMatchDetail(match) {
 
   // Matched skills chips
   const matchedWrap = $('modal-matched-skills-wrap');
-  const matchedEl   = $('modal-matched-skills');
+  const matchedEl = $('modal-matched-skills');
   matchedEl.innerHTML = '';
   const matched = bd?.matched_skills ?? [];
   if (matched.length) {
@@ -446,9 +428,7 @@ function showMatchDetail(match) {
   openModal('modal-match');
 }
 
-/* ══════════════════════════════════════════════════════════
-   RESUME VIEW
-   ══════════════════════════════════════════════════════════ */
+// Render parsed resume summary inline
 function renderResume() {
   const data = state.lastResponse;
   if (!data?.resume_summary) {
@@ -518,9 +498,7 @@ function renderResume() {
   }
 }
 
-/* ══════════════════════════════════════════════════════════
-   SETTINGS
-   ══════════════════════════════════════════════════════════ */
+// User preferences logic
 function applyDark(on, animated) {
   if (!animated) document.documentElement.style.transition = 'none';
   document.body.classList.toggle('dark', on);
@@ -544,9 +522,7 @@ function saveCountry() {
   closeModal('modal-country');
 }
 
-/* ══════════════════════════════════════════════════════════
-   OVERLAY & MODAL HELPERS
-   ══════════════════════════════════════════════════════════ */
+// Utilities for opening/closing modals and overlays
 function openOverlay(id) {
   const el = $(id); el.classList.remove('hidden');
 }
@@ -567,9 +543,7 @@ function closeOverlay(id, cb) {
 function openModal(id) { $(id).classList.remove('hidden'); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 
-/* ══════════════════════════════════════════════════════════
-   TOASTS
-   ══════════════════════════════════════════════════════════ */
+// Temporary success/error notifications
 function toast(msg, isError = false) {
   const t = document.createElement('div');
   t.className = `toast${isError ? ' error' : ''}`;
@@ -584,9 +558,7 @@ function toast(msg, isError = false) {
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 280); }, 3500);
 }
 
-/* ══════════════════════════════════════════════════════════
-   UTILS
-   ══════════════════════════════════════════════════════════ */
+// General utility and formatting functions
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
@@ -599,5 +571,5 @@ function initials(name) {
   return parts.slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('') || '?';
 }
 
-/* ── Boot ────────────────────────────────────────────────── */
+// Bootstrap app on load
 document.addEventListener('DOMContentLoaded', init);

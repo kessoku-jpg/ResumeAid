@@ -1,37 +1,4 @@
-"""
-Build Skill Taxonomy from O*NET
---------------------------------
-One-time converter: turns O*NET's official skills database into a
-compact lookup file (skill_taxonomy.json) that matching_engine.py
-(and resume_improver.py) read automatically.
-
-WHY THIS MATTERS: instead of a taxonomy typed from memory, this uses
-O*NET — real, government-maintained data mapping tens of thousands of
-specific tools/skills (e.g. "Java", "Excel") to the broader category
-they belong to (e.g. "Object or component oriented development
-software"). Free, no account or API key needed.
-
-This version matches O*NET's MODERN "full database" CSV package
-(lowercase_with_underscores filenames, one zip with dozens of CSVs):
-
-    software_skills.csv   — columns: O*NET-SOC Code, Title,
-                             Workplace Example, Element ID,
-                             Element Name, Hot Technology, In Demand
-
-("Workplace Example" is the specific tool/skill; "Element Name" is
-its broader category — O*NET renamed these from the older "Example"/
-"Commodity Title" naming used in older database releases, which this
-script also still supports as a fallback.)
-
-SETUP: put software_skills.csv (or the older-named equivalent) in the
-same folder as this script, then run:
-    python build_taxonomy_from_onet.py
-This creates skill_taxonomy.json. Re-run if you download a newer
-O*NET release.
-
-If skill_taxonomy.json is missing, matching_engine.py still works —
-it just falls back to a small built-in taxonomy instead.
-"""
+"""Builds skill_taxonomy.json from O*NET skills database."""
 
 import csv
 import json
@@ -62,16 +29,7 @@ def find_file(candidates):
 
 
 def merge_file_into_taxonomy(filepath, skill_col, category_col, taxonomy):
-    """
-    Reads one O*NET file (CSV or tab-delimited .txt) and merges its
-    skill/tool -> category mappings into the shared taxonomy dict.
-    Column names are looked up BY NAME (not position), so this is
-    resilient to column reordering across O*NET releases. Uses
-    Python's csv module (not a naive comma-split) since fields can
-    legitimately contain commas inside quotes.
-
-    Returns the number of rows successfully merged.
-    """
+    """Merges an O*NET file's skill categories into the taxonomy."""
     is_csv = filepath.lower().endswith(".csv")
     delimiter = "," if is_csv else "\t"
 

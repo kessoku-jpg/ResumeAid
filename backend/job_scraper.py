@@ -1,48 +1,4 @@
-"""
-Job Listing Fetcher (Adzuna API)
----------------------------------
-Replaces the old JSearch/RapidAPI integration with Adzuna — a free,
-official REST API that doesn't require a middleman service.
-
-WHY ADZUNA: Real API with proper developer access, generous free tier
-(250 calls/day, 2,500/month), no scrapers, clean structured JSON, and
-worldwide coverage including remote-friendly roles. Adzuna does NOT
-support Philippines as a country, so for PH-specific listings use the
-philjobnet_scraper.py and onlinejobs_scraper.py sources instead —
-this source covers international / remote jobs.
-
-SUPPORTED COUNTRY CODES (Adzuna):
-    gb  United Kingdom     us  United States
-    au  Australia          ca  Canada
-    de  Germany            fr  France
-    in  India              br  Brazil
-    nz  New Zealand        za  South Africa
-    at  Austria            pl  Poland
-
-    ⚠  Philippines (ph) is NOT supported by Adzuna.
-       For PH jobs, the pipeline already uses PhilJobNet + OnlineJobs.ph.
-
-SETUP (one-time):
-    1. Register for a FREE developer account at:
-           https://developer.adzuna.com/
-    2. Create an app — you'll get an app_id and app_key immediately.
-    3. Set them as environment variables:
-
-       Windows (PowerShell):
-           $env:ADZUNA_APP_ID  = "your_app_id"
-           $env:ADZUNA_APP_KEY = "your_app_key"
-       Mac/Linux:
-           export ADZUNA_APP_ID="your_app_id"
-           export ADZUNA_APP_KEY="your_app_key"
-
-    4. Install the one dependency:
-           pip install requests
-
-Usage:
-    python job_scraper.py "python developer"
-    python job_scraper.py "data analyst" gb
-    python job_scraper.py "project manager" us
-"""
+"""Fetches international/remote job listings via the Adzuna API."""
 
 import os
 import sys
@@ -66,10 +22,7 @@ UNSUPPORTED_FALLBACK = "gb"
 
 
 def _resolve_country(country_code):
-    """
-    Maps a country code to a valid Adzuna country. Philippines (ph) and
-    any other unsupported code fall back to 'gb' with a printed notice.
-    """
+    """Resolves unsupported country codes to 'gb' for Adzuna compatibility."""
     code = (country_code or "gb").lower().strip()
 
     if code == "ph":
@@ -91,18 +44,7 @@ def _resolve_country(country_code):
 
 
 def search_jobs(query, country="gb", results_per_page=10, page=1):
-    """
-    Searches Adzuna for jobs matching `query`, returns a list of job
-    dicts in the SAME schema the rest of the pipeline uses — drop-in
-    replacement for the old JSearch scraper:
-        {"title": ..., "company": ..., "description": ..., "url": ..., "location": ...}
-
-    `country` should be an ISO 3166-1 alpha-2 code supported by Adzuna
-    (see SUPPORTED_COUNTRIES above). Philippines (ph) is not supported;
-    passing it will fall back to 'gb' automatically.
-
-    Raises RuntimeError if ADZUNA_APP_ID or ADZUNA_APP_KEY aren't set.
-    """
+    """Searches Adzuna and returns jobs matching the project's standard schema."""
     app_id = os.environ.get("ADZUNA_APP_ID")
     app_key = os.environ.get("ADZUNA_APP_KEY")
 

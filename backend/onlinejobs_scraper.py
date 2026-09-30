@@ -1,41 +1,4 @@
-"""
-OnlineJobs.ph Scraper
------------------------
-Fetches real, live job listings from OnlineJobs.ph — the largest
-Philippine marketplace for remote/virtual-assistant work. Chosen
-because it's confirmed genuinely scrapable: a real robots.txt with a
-Crawl-delay directive (meaning crawling is permitted, just paced),
-no login wall on public job listings, and other developers already
-scrape it openly (several public tools/repos do this).
-
-TWO HONEST LIMITATIONS, confirmed before writing this:
-  1. Employer/company names are BLURRED and require a login to view
-     on this site — not something a scraper can get around. This
-     script honestly returns "Unknown" for company rather than
-     guessing. Title, description, salary, work type, and required
-     skills are all openly visible without an account.
-  2. This site is known (per a 2026 developer report) to BLOCK
-     requests coming from cloud server IP addresses — it works fine
-     from a normal residential connection (your own PC), but would
-     likely get blocked if this script runs on a cloud-hosted server
-     later (e.g. if you deploy your REST API to one). Keep that in
-     mind down the line.
-
-VERIFIED BUT NOT YET TEST-RUN: URL patterns and the real section
-labels below ("JOB OVERVIEW", "SKILL REQUIREMENT", etc.) were
-confirmed against real, live pages before writing this. What
-couldn't be verified: the exact HTML tags/CSS classes, since this
-environment only sees converted text, not raw HTML, and can't run
-this script network-side. Run it and tell me what happens — same
-approach as the other scrapers in this project.
-
-Install dependencies:
-    pip install requests beautifulsoup4
-
-Usage:
-    python onlinejobs_scraper.py "virtual assistant"
-    python onlinejobs_scraper.py "video editor" 5
-"""
+"""Scrapes remote job listings from OnlineJobs.ph."""
 
 import re
 import sys
@@ -73,10 +36,7 @@ def _get_soup(url):
 
 
 def _find_job_detail_links(search_results_soup, max_results):
-    """
-    Finds job detail page URLs by matching the URL PATTERN (confirmed
-    real: /jobseekers/job/{slug}-{id}) rather than any CSS class.
-    """
+    """Extracts job detail URLs from the search results page."""
     pattern = re.compile(r"/jobseekers/job/[\w-]+-\d+")
     seen = set()
     urls = []
@@ -95,13 +55,7 @@ def _find_job_detail_links(search_results_soup, max_results):
 
 
 def _extract_section_text(soup, heading_text, max_chars=2000):
-    """
-    Finds a tag whose own text matches heading_text (case-
-    insensitive, trailing colon ignored — some real headings on this
-    site end in ":"), collects text from subsequent tags in document
-    order until hitting any OTHER known section label. Returns ""
-    if the heading isn't found.
-    """
+    """Extracts text for a specific section heading from the job page."""
     heading_lower = heading_text.strip().rstrip(":").lower()
     other_labels = {lbl.rstrip(":") for lbl in KNOWN_SECTION_LABELS if lbl != heading_lower}
 
@@ -134,10 +88,7 @@ def _extract_section_text(soup, heading_text, max_chars=2000):
 
 
 def _parse_job_detail(url):
-    """
-    Fetches one job detail page and extracts a job dict matching the
-    project-wide schema: title, company, description, url, location.
-    """
+    """Parses a single job detail page into the standard job schema."""
     soup = _get_soup(url)
 
     h1 = soup.find("h1")
@@ -174,11 +125,7 @@ def _parse_job_detail(url):
 
 
 def search_jobs(query, max_results=10):
-    """
-    Searches OnlineJobs.ph for `query`, returns a list of job dicts
-    in the SAME schema used throughout this project — drop-in
-    compatible with pipeline.py, matching_engine.py, etc.
-    """
+    """Searches OnlineJobs.ph and returns standard job dicts."""
     search_url = SEARCH_URL_TEMPLATE.format(query=quote(query))
     search_soup = _get_soup(search_url)
 

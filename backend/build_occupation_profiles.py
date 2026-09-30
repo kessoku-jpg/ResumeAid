@@ -1,40 +1,4 @@
-"""
-Build Occupation Profiles from O*NET
---------------------------------------
-One-time converter: builds occupation_profiles.json, which maps each
-O*NET occupation to its title, known alternate titles, and its most
-important generic skills/knowledge/abilities (per O*NET's own
-importance ratings).
-
-WHY THIS MATTERS: right now, matching only works with whatever text is
-literally IN the scraped job description. A short/vague posting (many
-real ones are) gives the matching engine very little to work with.
-This lets the engine recognize a job's TITLE (e.g. "Software
-Developer"), match it to the closest O*NET occupation, and pull in
-that occupation's well-established important skills (e.g.
-"Programming", "Complex Problem Solving", "Critical Thinking") even
-if the actual posting text never spells those out. matching_engine.py
-uses this to enrich thin job descriptions before scoring.
-
-Requires FIVE O*NET files (all from the same "download all" package):
-    "Occupation Data.csv"   — occupation codes + canonical titles
-    "Alternate Titles.csv"  — job title synonyms per occupation
-    "Skills.csv"            — importance-rated generic skills
-    "Knowledge.csv"         — importance-rated knowledge areas
-    "Abilities.csv"         — importance-rated abilities
-
-SETUP (one-time, on your own machine):
-    1. Unzip your O*NET database download
-    2. Put all five files above in the same folder as this script
-       (don't rename them)
-    3. Run: python build_occupation_profiles.py
-       This creates occupation_profiles.json — matching_engine.py
-       picks it up automatically. Run again if you download a newer
-       O*NET release later.
-
-If occupation_profiles.json is missing, matching_engine.py still
-works fine — it just skips this enrichment step entirely.
-"""
+"""Builds occupation_profiles.json from O*NET CSV files."""
 
 import csv
 import json
@@ -75,9 +39,7 @@ def open_reader(filepath):
 
 
 def load_occupation_titles():
-    """
-    Reads Occupation Data.csv -> { soc_code: canonical_title }
-    """
+    """Reads Occupation Data.csv to get canonical titles."""
     filepath = find_file(OCCUPATION_DATA_CANDIDATES)
     if filepath is None:
         raise FileNotFoundError(
@@ -102,9 +64,7 @@ def load_occupation_titles():
 
 
 def load_alternate_titles():
-    """
-    Reads Alternate Titles.csv -> { soc_code: [alt_title, alt_title, ...] }
-    """
+    """Reads Alternate Titles.csv to get alternate titles."""
     filepath = find_file(ALTERNATE_TITLES_CANDIDATES)
     if filepath is None:
         print("No Alternate Titles file found — proceeding with canonical titles only")
@@ -129,14 +89,7 @@ def load_alternate_titles():
 
 
 def load_rating_file(filepath):
-    """
-    Reads a Skills/Knowledge/Abilities file and returns:
-        { soc_code: [(element_name, importance_value), ...] }
-    sorted by importance descending, keeping only the top N per
-    occupation. Filters to Scale ID == "IM" (the 1-5 Importance
-    scale) — these files also contain "LV" (Level) rows, which we
-    don't need here.
-    """
+    """Reads a ratings file and returns the top elements per occupation."""
     ratings = defaultdict(list)
     f, reader = open_reader(filepath)
     with f:

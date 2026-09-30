@@ -1,43 +1,10 @@
 """
 Semantic Matching Engine
 ------------------------
-Compares a parsed resume against a job description and produces a
-match score. The architecture has three distinct layers, kept
-deliberately separate:
-
-  1. DATA GROUNDING — before anything gets compared, both the resume
-     and the job description are enriched using REAL external data:
-       - O*NET's skill/tools taxonomy (skill_taxonomy.json), so a
-         specific skill like "Java" is understood to also mean
-         "computer skills" / "programming" — not because of a string
-         match, but because O*NET's own government-maintained data
-         says so.
-       - O*NET's occupation profiles (occupation_profiles.json), so a
-         job title like "Java Developer" pulls in that occupation's
-         real, importance-ranked skills — useful when a scraped
-         posting's actual text is thin or vague.
-     Both are optional. If the JSON files aren't present, the engine
-     still works — it just skips this enrichment step.
-
-  2. SEMANTIC SCORING — the ONLY thing that produces the match score
-     is Sentence-BERT embeddings compared with cosine similarity.
-     There is NO keyword/substring matching anywhere in this layer.
-     Matching runs at "fine-grained" granularity: every individual
-     job requirement is compared against every individual resume
-     segment, so a specific strong match doesn't get diluted by
-     unrelated content sitting elsewhere in either text.
-
-  3. EXPLANATION — a short human-readable comment describing the
-     score. This layer MAY mention literal keyword overlaps (e.g.
-     "you directly listed Python, which this posting also mentions")
-     as supporting evidence for the person reading it — but this is
-     cosmetic only. It never feeds back into the score itself.
-
-Install dependencies first:
-    pip install sentence-transformers
-
-The first time you run this, it downloads the model (~90MB)
-automatically — that only happens once, then it's cached.
+Compares a parsed resume against a job description using a 3-layer architecture:
+1. DATA GROUNDING (O*NET enrichment)
+2. SEMANTIC SCORING (Sentence-BERT embeddings)
+3. EXPLANATION (Human-readable comments)
 """
 
 import json
@@ -106,13 +73,7 @@ FALLBACK_SKILL_TAXONOMY = {
 
 
 def expand_skills_with_categories(skills):
-    """
-    Given a list of resume skills, returns the ORIGINAL list plus
-    broader category names implied by those skills. This is what lets
-    the semantic layer "understand" that a specific skill implies a
-    broader capability — the understanding comes from real data
-    (O*NET), not from string matching against the job description.
-    """
+    """Expands resume skills with broader categories using O*NET data and fallbacks."""
     skills_lower = {s.lower() for s in skills}
     implied = set()
 
@@ -156,13 +117,7 @@ OCCUPATION_MATCH_THRESHOLD = 0.55
 
 
 def _build_occupation_title_index():
-    """
-    Builds a flat list of every (title_text, soc_code) pair — the
-    canonical title AND every alternate title for each occupation —
-    plus their embeddings, so an incoming job title can be compared
-    against all of them at once. Cached to disk after the first run
-    since embedding thousands of titles takes a few seconds.
-    """
+    """Builds a cached flat list of (title, soc_code) pairs and their embeddings."""
     if not OCCUPATION_PROFILES:
         return [], None
 
@@ -197,11 +152,7 @@ _OCCUPATION_TITLE_ENTRIES, _OCCUPATION_TITLE_EMBEDDINGS = _build_occupation_titl
 
 
 def find_best_occupation(job_title):
-    """
-    Returns (soc_code, profile, similarity) for the O*NET occupation
-    whose title/alternate-titles best match job_title, or None if no
-    profiles are loaded or nothing clears OCCUPATION_MATCH_THRESHOLD.
-    """
+    """Returns the best matching O*NET occupation for a job title, or None."""
     if not job_title or _OCCUPATION_TITLE_EMBEDDINGS is None:
         return None
 
@@ -239,15 +190,7 @@ JOB_TITLE_INFERENCE_THRESHOLD = 0.25
 
 
 def _build_occupation_profile_text_index():
-    """
-    Builds one embedding PER OCCUPATION (not per alt-title like the
-    index above) representing "what this occupation is" — its title
-    plus its top distinctive skills, e.g. "Software Developers.
-    Skills: Programming, Systems Analysis, Technology Design." A
-    resume's skills get compared against these to find the closest
-    occupation. Cached to disk after the first run, same reasoning as
-    _build_occupation_title_index above.
-    """
+    """Builds and caches one embedding per occupation representing its title and top skills."""
     if not OCCUPATION_PROFILES:
         return [], None
 
@@ -282,28 +225,7 @@ _OCCUPATION_PROFILE_SOC_CODES, _OCCUPATION_PROFILE_TEXT_EMBEDDINGS = _build_occu
 
 
 def infer_job_title(parsed_resume):
-    """
-    Given a parsed resume, guesses the most likely job title to search
-    for — WITHOUT the person having to type one. Embeds the resume's
-    content and finds the closest-matching O*NET occupation profile.
-    Returns (title, similarity_score), or None if no profiles are
-    loaded or nothing clears JOB_TITLE_INFERENCE_THRESHOLD (a resume
-    too thin/unclear to confidently guess from).
-
-    Builds its query text via build_resume_segments() — the SAME
-    function used for actual scoring — rather than assembling a
-    separate text blob. This matters: an earlier version fell back to
-    the noisy COMBINED "skills" field (explicit + noun-chunk fallback
-    candidates) whenever a resume had no dedicated Skills section,
-    which reintroduced exactly the noise build_resume_segments()
-    already excludes for scoring (stray words like "day", "Main
-    Campus", "January" pulled from body text). That caused a real
-    resume with strong HR-specific vocabulary in its experience
-    section (buried among the noise) to get misread as "Telemarketers"
-    instead of an HR-related occupation. Reusing build_resume_segments
-    guarantees inference sees exactly the same trustworthy content the
-    real matching does — nothing more, nothing noisier.
-    """
+    """Infers the most likely job title to search for based on resume content."""
     if _OCCUPATION_PROFILE_TEXT_EMBEDDINGS is None:
         return None
 
@@ -326,22 +248,7 @@ def infer_job_title(parsed_resume):
 
 
 def expand_job_description_with_occupation(job_title, job_description):
-    """
-    If job_title confidently matches a known O*NET occupation, appends
-    that occupation's top skills as an extra line — enriching thin
-    postings with real, external substance before matching runs.
-    Returns job_description unchanged if no confident match is found.
-
-    Joined with " / " rather than ", " on purpose: split_into_requirements
-    splits on commas to get atomic requirement chunks, and a naive
-    comma-join here would let one profile with 10-15 elements explode
-    into 10-15 SEPARATE requirement chunks — heavily outweighing the
-    job posting's own actual requirements in the averaged score, even
-    after the generic-element filtering done in
-    build_occupation_profiles.py. Using " / " keeps this enrichment as
-    ONE proportionate chunk, contributing one data point to the
-    average like everything else, rather than dominating it.
-    """
+    """Appends top occupational skills to the job description if the title matches O*NET."""
     match = find_best_occupation(job_title)
     if match is None:
         return job_description
@@ -361,12 +268,7 @@ def expand_job_description_with_occupation(job_title, job_description):
 # =======================================================================
 
 def _is_noise_segment(segment):
-    """
-    Filters resume segments that are pure extraction artifacts (bare
-    numbers, number ranges, stray bullets) WITHOUT dropping real short
-    skills like "C". This is a data-cleanliness filter, not a
-    matching mechanism — it runs before any embedding happens.
-    """
+    """Filters out noise segments (e.g., bare numbers) before embedding."""
     stripped = segment.strip(" -•*\t")
     if not stripped:
         return True
@@ -376,34 +278,7 @@ def _is_noise_segment(segment):
 
 
 def build_resume_segments(parsed_resume):
-    """
-    Breaks the resume into a list of separate short segments used as
-    matching candidates. Two sources, deliberately NOT treated equally:
-
-      1. explicit_skills (preferred) — items from an actual Skills
-         section. Unambiguous: the candidate wrote "Python" as a
-         skill, so "Python" as a segment means Python-the-skill.
-         Falls back to the older combined "skills" field if a resume
-         was parsed with an earlier version of resume_parser.py that
-         doesn't provide explicit_skills separately.
-
-      2. Full sentences from experience/other sections. Kept as
-         WHOLE LINES, not broken into individual words, specifically
-         to preserve context — "updated employee database" as one
-         segment can't be confused with "SQL databases" the way the
-         bare word "database" alone can.
-
-      inline_skills (the noisy noun-chunk fallback candidates) are
-      DELIBERATELY EXCLUDED from scoring. They're useful for display
-      ("skills" combines everything for that purpose) but not for
-      matching: a context-free fragment like "database" pulled out of
-      a sentence about employee records can score misleadingly high
-      against an unrelated technical requirement like "SQL databases"
-      just from sharing a root word, with none of the context that
-      would show they mean different things. Real bug found via
-      debug_match() — an HR resume's stray "database" fragment was
-      outscoring an actual programmer's resume on a job requiring SQL.
-    """
+    """Extracts resume segments for matching from explicit skills and full sentences."""
     segments = []
 
     explicit_skills = parsed_resume.get("explicit_skills")
@@ -433,19 +308,7 @@ def build_resume_segments(parsed_resume):
 
 
 def split_into_requirements(job_description):
-    """
-    Splits a job description into individual requirement-sized chunks
-    instead of treating it as one block — the other half of
-    fine-grained matching.
-
-    Two-stage split: first on sentence/bullet boundaries, THEN on
-    commas. Splitting only on sentences isn't fine enough — a real
-    sentence like "requiring Python experience, SQL databases, and
-    Docker" bundles three separate technologies into one chunk, which
-    dilutes the embedding so even a perfect match on one of them only
-    scores moderately. Comma-splitting breaks these into near-atomic
-    pieces so each technology can be judged on its own.
-    """
+    """Splits job description into individual requirement chunks."""
     sentence_parts = re.split(r'[.\n;•]+', job_description)
 
     chunks = []
@@ -460,33 +323,7 @@ def split_into_requirements(job_description):
 
 
 def compute_semantic_match_score(resume_segments, job_description, return_details=False):
-    """
-    THE core scoring function. Embeds every job requirement chunk and
-    every resume segment, then for each requirement keeps only its
-    single best-matching resume segment (cosine similarity). The
-    final score blends the AVERAGE of those per-requirement best
-    matches with the PEAK (single best) match.
-
-    Why blend instead of just averaging: a plain average unfairly
-    punishes a job with few requirement chunks when one of those
-    chunks has nothing in the resume to match — one strong, specific
-    match (e.g. a literal Python skill against a Python requirement)
-    can get dragged down to a mediocre overall score by an unrelated
-    requirement sitting right next to it. Meanwhile a vague job
-    description with uniformly mediocre-but-consistent chunks can
-    score just as high through sheer consistency, without ever having
-    a genuinely strong match. Blending in the peak score rewards
-    resumes that have at least one clearly strong, specific fit,
-    without ignoring overall coverage entirely.
-
-    Nothing here does string/substring matching. This is pure
-    embedding similarity.
-
-    If return_details=True, also returns a list of dicts (one per
-    requirement) showing which resume segment matched it best and at
-    what score — use this for debugging via debug_match(), not in
-    normal scoring calls.
-    """
+    """Computes semantic match score using Sentence-BERT embeddings."""
     requirements = split_into_requirements(job_description)
     if not requirements or not resume_segments:
         return (0.0, []) if return_details else 0.0
@@ -523,14 +360,7 @@ def compute_semantic_match_score(resume_segments, job_description, return_detail
 # =======================================================================
 
 def generate_match_comment(score, resume_skills, job_description):
-    """
-    Produces a short explanation for the score. May mention literal
-    skill overlaps as supporting evidence for the reader (using
-    word-boundary matching, NOT plain substring — a plain substring
-    check would wrongly "match" a skill like "C" against a word like
-    "containerization"). This is display text only; it has no
-    influence on the score computed above.
-    """
+    """Generates a human-readable explanation for the match score."""
     matched_skills = [
         skill for skill in resume_skills
         if re.search(r'\b' + re.escape(skill.lower()) + r'\b', job_description.lower())
@@ -554,17 +384,7 @@ def generate_match_comment(score, resume_skills, job_description):
 
 
 def compute_breakdown_scores(parsed_resume, job_description, job_title=None):
-    """
-    Computes per-dimension semantic similarity sub-scores for display.
-    Returns a dict with:
-      - skills_score     : cosine sim between resume skills text and job description (0-100)
-      - experience_score : cosine sim between resume experience text and job description (0-100)
-      - title_score      : cosine sim between the job title and the inferred resume occupation (0-100)
-      - matched_skills   : list of skill strings that appear literally in the job description
-
-    These scores are DISPLAY-ONLY — they do not feed back into the main
-    match_score in any way.
-    """
+    """Computes individual similarity scores for skills, experience, and title."""
     skills = parsed_resume.get("explicit_skills") or parsed_resume.get("skills") or []
     experience = parsed_resume.get("experience") or ""
 
@@ -614,11 +434,7 @@ def compute_breakdown_scores(parsed_resume, job_description, job_title=None):
 # =======================================================================
 
 def match_resume_to_job(parsed_resume, job_description, job_title=None):
-    """
-    Main entry point. Give it a parsed resume dict (from
-    resume_parser.py), a job description string, and optionally the
-    job's title, and get back a score, explanation, and breakdown.
-    """
+    """Main entry point. Returns a match score, explanation, and breakdown."""
     expanded_description = expand_job_description_with_occupation(job_title, job_description)
     resume_segments = build_resume_segments(parsed_resume)
 
@@ -630,24 +446,7 @@ def match_resume_to_job(parsed_resume, job_description, job_title=None):
 
 
 def rank_jobs_for_resume(parsed_resume, job_listings):
-    """
-    Given a parsed resume and a list of job listings (each a dict
-    with at least a 'description' key, ideally 'title' too), returns
-    them ranked by match score, highest first.
-
-    Returns TWO scores per job plus a breakdown:
-      - match_score: the semantic matching percentage
-      - relative_score: that job's score rescaled against the OTHER
-        jobs in this batch (best -> ~100%, worst -> ~0%). Raw cosine
-        similarity between any two pieces of normal professional
-        English has a noise floor — even an unrelated resume/job pair
-        tends to land around 20-40% — so relative_score is what
-        actually differentiates good fits from bad ones WITHIN one
-        batch. Use match_score if you need a standalone number
-        instead.
-      - breakdown: per-dimension scores (skills, experience, title)
-        and matched_skills list — for frontend visualization only.
-    """
+    """Ranks a list of job listings against a resume by match score."""
     resume_segments = build_resume_segments(parsed_resume)
     results = []
 
@@ -676,18 +475,7 @@ def rank_jobs_for_resume(parsed_resume, job_listings):
 
 
 def debug_match(parsed_resume, job_description, job_title=None):
-    """
-    Diagnostic tool: prints exactly which resume segment matched each
-    job requirement chunk, and at what score, plus the overall
-    blended score. Use this whenever a result looks surprising —
-    it shows you exactly where the number came from.
-
-    Example:
-        from resume_parser import parse_resume
-        from matching_engine import debug_match
-        resume = parse_resume("my_resume.pdf")
-        debug_match(resume, "Full-stack role requiring Python...")
-    """
+    """Diagnostic tool to inspect fine-grained matches and scores."""
     expanded_description = expand_job_description_with_occupation(job_title, job_description)
     resume_segments = build_resume_segments(parsed_resume)
 

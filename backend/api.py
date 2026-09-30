@@ -1,57 +1,11 @@
 """
-REST API
---------
-Wraps pipeline.py in a Flask HTTP server so the Android app can
-actually call it, instead of only being runnable from the command
-line.
+ResumeAid REST API.
+Exposes the pipeline via a Flask HTTP server for client apps.
 
-ONE ENDPOINT does the real work:
-    POST /api/analyze
-        multipart/form-data with:
-          - resume: the PDF/DOCX file (required)
-          - query: custom search text (optional â€” auto-derived from
-            the resume's skills if omitted, same as pipeline.py)
-          - country: country code for JSearch location filter (optional, default "us")
-          - source: "all" | "philjobnet" | "adzuna" | "onlinejobs"
-            (optional, default "all")
-
-    Returns JSON:
-        {
-          "resume_summary": { name, email, phone, skills, education, experience },
-          "health_check": { issues, suggestions, suggested_skills },
-          "search_info": { query, confidence, source },
-          "matches": [
-            { title, company, location, url, match_score, relative_score, comment },
-            ...
-          ]
-        }
-
-Also:
-    GET /api/health   -> {"status": "ok"}   (simple connectivity check)
-
-NOTE ON RESPONSE SHAPE vs. the Android project's existing Job.java /
-Resume.java POJOs: those were written earlier as UI-only placeholders
-(before the real backend existed) and include fields like "TF-IDF
-score" and "tags" that this backend doesn't actually produce. The
-fields above are what the real pipeline actually computes â€” the
-Android models will need updating to match these real field names
-(match_score, relative_score, comment) rather than the placeholder
-ones.
-
-Install dependencies (on top of everything pipeline.py already needs):
-    pip install flask
-
-Run it:
-    python api.py
-Then it's reachable at http://<your-computer's-LAN-IP>:5000 from a
-phone on the same network (use your Android emulator's special host
-alias 10.0.2.2 instead of localhost/127.0.0.1 if testing on an
-emulator rather than a real device).
-
-NOTE ON MODEL LOADING: importing pipeline.py (which imports
-matching_engine.py) loads the Sentence-BERT model once, at server
-startup â€” not per-request. That's why the first request after
-starting the server is instant, not slow.
+Endpoints:
+  POST /api/analyze: Takes a resume (PDF/DOCX) and optional query, country, source.
+                     Returns parsed resume, health check, and matched jobs.
+  GET /api/health: Returns {"status": "ok"}.
 """
 
 import os
@@ -66,7 +20,7 @@ app = Flask(__name__)
 CORS(app)  # Allow requests from browser / file://
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
-MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB â€” generous for a resume file
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB maximum for resume files
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_SIZE_BYTES
 
 
@@ -82,7 +36,7 @@ def analyze():
 
     uploaded_file = request.files["resume"]
     if uploaded_file.filename == "":
-        return jsonify({"error": "Empty filename â€” no file was actually selected."}), 400
+        return jsonify({"error": "Empty filename - no file was actually selected."}), 400
 
     _, extension = os.path.splitext(uploaded_file.filename.lower())
     if extension not in ALLOWED_EXTENSIONS:
@@ -92,10 +46,7 @@ def analyze():
     country = request.form.get("country", "ph")
     source = request.form.get("source", "all")
 
-    # Save the upload to a real temp file â€” resume_parser.py's
-    # extractors need an actual file path on disk, not an in-memory
-    # stream, since pdfplumber/python-docx both expect a path or
-    # file-like object opened in a specific way.
+    # Save uploaded file to temp path so extractors (pdfplumber/docx) can read it
     temp_dir = tempfile.mkdtemp(prefix="resumeaid_")
     temp_path = os.path.join(temp_dir, uploaded_file.filename)
 
@@ -141,14 +92,11 @@ def analyze():
         })
 
     except Exception as e:
-        # Catch-all so a parsing/matching failure returns a clean JSON
-        # error instead of Flask's default HTML error page â€” an
-        # Android app expects JSON back, not HTML.
+        # Catch-all to ensure a clean JSON error response for clients
         return jsonify({"error": f"Failed to process resume: {e}"}), 500
 
     finally:
-        # Clean up the temp file/dir regardless of success or failure â€”
-        # this is a stateless API, nothing should linger on disk.
+        # Ensure temp file cleanup to keep API stateless
         try:
             os.remove(temp_path)
             os.rmdir(temp_dir)
@@ -157,8 +105,7 @@ def analyze():
 
 
 if __name__ == "__main__":
-    # host="0.0.0.0" makes this reachable from other devices on the
-    # same network (like a phone), not just this computer itself.
+    # Bind to 0.0.0.0 to allow network access for testing
     app.run(host="0.0.0.0", port=5000, debug=True)
 
 

@@ -1,22 +1,4 @@
-"""
-Resume Parser
--------------
-Extracts structured data (name, skills, education, experience, etc.)
-from PDF and DOCX resumes.
-
-Install dependencies first:
-    pip install pdfplumber python-docx pytesseract pdf2image spacy
-    python -m spacy download en_core_web_sm
-
-Note: pytesseract also requires the Tesseract OCR engine installed on
-your system (not just the Python package). On Windows, download it from
-https://github.com/UB-Mannheim/tesseract/wiki and add it to PATH.
-On Mac: brew install tesseract. On Linux: sudo apt install tesseract-ocr.
-
-pdf2image also requires poppler installed separately:
-Mac: brew install poppler | Linux: sudo apt install poppler-utils
-Windows: download poppler binaries and add to PATH.
-"""
+"""Extracts structured data from PDF and DOCX resumes."""
 
 import re
 import json
@@ -87,11 +69,7 @@ def extract_text(filepath):
 # ---------------------------------------------------------------------
 
 def ocr_pdf(filepath):
-    """
-    Used when a PDF has little/no extractable text, meaning it's
-    probably a scanned image rather than real text. Converts each
-    page to an image, then reads text off the image.
-    """
+    """OCR fallback for scanned PDFs."""
     if not OCR_AVAILABLE:
         raise RuntimeError(
             "OCR libraries not installed. Run: "
@@ -125,20 +103,7 @@ def clean_text(text):
 # ---------------------------------------------------------------------
 
 def is_likely_header(line):
-    """
-    Decides whether a line LOOKS like a section header, based on
-    formatting patterns rather than matching specific words.
-
-    Real resume headers tend to be:
-      - short (a handful of words, not a full sentence)
-      - written in ALL CAPS or Title Case
-      - not ending in a period or comma (headers don't end sentences)
-      - not starting with a bullet symbol (that's body content, not a header)
-
-    This is a set of rules of thumb ("heuristics") — it won't be
-    perfect on every resume template, but it generalizes far better
-    than a fixed list of expected header words.
-    """
+    """Identifies potential section headers based on text formatting patterns."""
     stripped = line.strip()
 
     if not stripped:
@@ -185,13 +150,7 @@ def is_likely_header(line):
 
 
 def split_into_sections(text):
-    """
-    Walks through the resume line by line. Whenever a line looks like
-    a header (per is_likely_header), everything after it gets filed
-    under a section named after that line, until the next header.
-    No predetermined list of section names is needed — whatever
-    headers actually appear in the resume become the section names.
-    """
+    """Dynamically splits resume text into sections based on detected headers."""
     lines = text.split("\n")
     sections = {}
     current_section = "header"  # anything before the first detected header
@@ -213,13 +172,7 @@ def split_into_sections(text):
 
 
 def find_section(sections, *keywords):
-    """
-    Since section names are now whatever the resume calls them
-    (not fixed keys), this searches the detected section names for
-    ANY of the given keywords and returns the first match.
-    e.g. find_section(sections, "experience", "work history", "employment")
-    will match a section titled "Work Experience" OR "Employment History".
-    """
+    """Finds and returns the content of the first matching section keyword."""
     for name, content in sections.items():
         for keyword in keywords:
             if keyword in name:
@@ -232,10 +185,7 @@ def find_section(sections, *keywords):
 # ---------------------------------------------------------------------
 
 def extract_entities(text):
-    """
-    Runs spaCy's named entity recognition over the text and sorts
-    results into buckets: people's names, organizations, dates.
-    """
+    """Extracts names, organizations, and dates using spaCy NER."""
     doc = nlp(text)
     entities = {"names": [], "orgs": [], "dates": []}
 
@@ -251,28 +201,7 @@ def extract_entities(text):
 
 
 def extract_skills(text, sections):
-    """
-    Pulls individual skills out WITHOUT any predetermined list of
-    known skills, and WITHOUT relying only on a dedicated Skills
-    section — since a skill mentioned only inside an Experience
-    bullet (e.g. "led sprint planning using Agile and Jira") would
-    otherwise never get picked up.
-
-    Returns TWO separate lists — kept apart on purpose, not merged:
-      1. explicit_skills — items from a detected Skills section, if
-         one exists. Clean, high-confidence: this is a deliberate
-         list the candidate wrote as a list.
-      2. inline_candidates — noun phrases scanned from the ENTIRE
-         resume text (catches skills mentioned inline in
-         Experience/Projects). Noisier: a bare word like "database"
-         pulled out of "updated employee database" loses its context
-         and can look deceptively like a strong match for something
-         unrelated (e.g. "SQL databases") to a matching engine, since
-         it's now indistinguishable from the real thing. Useful for
-         display, NOT safe to use as an equal-confidence match
-         candidate — matching_engine.py only uses explicit_skills for
-         scoring for this reason.
-    """
+    """Extracts skills from dedicated sections and inline text."""
     skills_section = find_section(
         sections, "skills", "technical skills", "tech stack",
         "core competencies", "competencies", "tools"
@@ -305,15 +234,7 @@ KNOWN_CONTENT_INDICATORS = [
 
 
 def _build_body_text(sections):
-    """
-    Joins section content into one block, EXCLUDING the contact block
-    at the top of the resume (name, address, phone, email). This
-    matters because a name like "Maria Santos" or an address line can
-    get misdetected by is_likely_header() as its own short "section" —
-    so simply excluding the literal "header" bucket isn't enough; we
-    also skip any section BEFORE the first one that looks like real
-    resume content (education, experience, skills, etc.).
-    """
+    """Combines content sections, skipping the top contact block."""
     body_parts = []
     past_contact_block = False
 
@@ -331,12 +252,7 @@ def _build_body_text(sections):
 
 
 def _split_into_items(section_text):
-    """
-    Takes a block of text (the Skills section) and splits it into
-    individual items using common list delimiters. Filters out
-    anything too long to plausibly be a single skill (that's more
-    likely a leftover sentence than a skill name).
-    """
+    """Splits a text block into individual list items."""
     # Normalize bullet characters into commas so everything splits the same way
     normalized = re.sub(r'[•▪◦‣]', ',', section_text)
     # Also treat line breaks and pipes as delimiters, alongside commas/semicolons
@@ -357,28 +273,7 @@ def _split_into_items(section_text):
 
 
 def _extract_noun_chunk_candidates(text):
-    """
-    Scans resume body text for short noun phrases (e.g. "machine
-    learning", "customer service", "Jira") that might be skills,
-    using spaCy's noun-chunk detection. Catches skills mentioned
-    inline inside Experience or Project bullets, not just ones listed
-    in a dedicated Skills section.
-
-    Processes the text ONE LINE AT A TIME rather than as one big
-    block. This matters: resume lines are often fragments (bullet
-    points, headers, dates) rather than full sentences, and running
-    spaCy over the whole merged block let noun phrases incorrectly
-    span across two unrelated lines (e.g. a date ending one line
-    fusing with a word starting the next).
-
-    This is inherently noisier than a labeled Skills section — not
-    every short noun phrase is actually a skill. Filtering below
-    removes the most obvious non-skill noise, but expect some
-    irrelevant phrases in the output. That's an acceptable tradeoff
-    since this list is for display/explainability, not for the core
-    semantic matching (which reads full passages of text, not this
-    list).
-    """
+    """Extracts potential inline skills using spaCy noun chunks."""
     # Generic words/phrases that pass the noun-chunk/casing filters but
     # are almost never skills — filtered out explicitly since spaCy
     # alone won't know they're not domain-relevant
@@ -459,10 +354,7 @@ def extract_contact_info(text):
 # ---------------------------------------------------------------------
 
 def parse_resume(filepath):
-    """
-    Main entry point. Give it a path to a PDF or DOCX resume,
-    get back a structured dictionary.
-    """
+    """Main entry point. Parses a resume file into a structured dictionary."""
     raw_text = extract_text(filepath)
 
     # If almost no text came out, this is probably a scanned PDF — fall back to OCR

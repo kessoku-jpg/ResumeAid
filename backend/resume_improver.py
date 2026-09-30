@@ -1,28 +1,4 @@
-"""
-Resume Improver
-----------------
-Diagnoses structural problems in a resume BEFORE it reaches the
-matching engine, and — where possible — fixes the biggest one
-automatically: a missing or thin Skills section.
-
-WHY THIS MATTERS: every real bug we've found in this project so far
-(the false "database" match, the "Telemarketers" misclassification)
-traced back to the same root cause — a resume with no dedicated
-Skills section forces the parser to guess at skills from body text,
-which is inherently noisier than a real listed skill. This tool
-attacks that problem directly: it scans the ENTIRE resume against
-O*NET's real, government-maintained vocabulary of ~8,700 known
-skills/tools (skill_taxonomy.json) and surfaces genuine matches the
-person can add as an explicit Skills section — turning noisy inline
-mentions into clean, trustworthy ones.
-
-Requires skill_taxonomy.json (see build_taxonomy_from_onet.py).
-Without it, this tool still runs the structural diagnostics, just
-skips the skill-suggestion step.
-
-Usage:
-    python resume_improver.py my_resume.pdf
-"""
+"""Diagnoses resume structural problems and suggests improvements."""
 
 import json
 import os
@@ -67,14 +43,7 @@ AMBIGUOUS_BARE_WORDS = {
 
 
 def _load_skill_vocabulary():
-    """
-    Loads skill_taxonomy.json and builds a SET of known skill/tool
-    names to scan for, including vendor-prefix-stripped aliases (see
-    above). Returns (vocabulary_set, display_names) where
-    display_names maps the lowercased term back to a nicely-cased
-    version for output (title case, since these read like proper
-    nouns/product names).
-    """
+    """Loads O*NET skill taxonomy and creates a vocabulary set."""
     try:
         with open(_SKILL_TAXONOMY_PATH, encoding="utf-8") as f:
             taxonomy = json.load(f)
@@ -103,17 +72,7 @@ _SKILL_VOCABULARY, _SKILL_DISPLAY_NAMES = _load_skill_vocabulary()
 
 
 def scan_for_known_skills(text, max_phrase_length=4):
-    """
-    Scans resume text for mentions of real O*NET skill/tool names,
-    using a greedy longest-match n-gram scan against _SKILL_VOCABULARY
-    (word-boundary safe — tokenizes first, so this won't match "java"
-    inside an unrelated longer word). Longest-match means "javascript"
-    correctly wins over a shorter overlapping match like "java" when
-    both could apply to the same text.
-
-    Returns a list of matched skill names (nicely-cased for display),
-    deduplicated, in the order first encountered.
-    """
+    """Scans resume text for known O*NET skills using greedy longest-match."""
     if not _SKILL_VOCABULARY:
         return []
 
@@ -145,13 +104,7 @@ def scan_for_known_skills(text, max_phrase_length=4):
 
 
 def analyze_parsed_resume(parsed, filepath="resume"):
-    """
-    Runs the diagnostic checks against an ALREADY-parsed resume dict
-    (avoids re-parsing the file — pipeline.py already has one).
-    Returns (issues, suggestions, suggested_skills) without printing
-    anything — see print_report() for that, or diagnose_resume() for
-    the combined parse+analyze+print flow used by the CLI.
-    """
+    """Runs diagnostic checks on a parsed resume dict."""
     raw_text = extract_text(filepath) if os.path.exists(filepath) else ""
     cleaned_full_text = clean_text(raw_text) if raw_text else ""
 
@@ -218,7 +171,7 @@ def analyze_parsed_resume(parsed, filepath="resume"):
 
 
 def print_report(filepath, issues, suggestions, suggested_skills):
-    """Prints the full diagnostic report — split out so pipeline.py can print a shorter version if it wants."""
+    """Prints the full diagnostic report."""
     print(f"=== Resume Health Check: {filepath} ===\n")
     if not issues:
         print("No structural issues detected — resume is well-formed for matching.\n")
@@ -239,12 +192,7 @@ def print_report(filepath, issues, suggestions, suggested_skills):
 
 
 def diagnose_resume(filepath):
-    """
-    CLI entry point: parses the resume file, runs diagnostics, prints
-    the full report. Returns the parsed resume dict plus the list of
-    suggested skills, in case a caller wants to use them
-    programmatically.
-    """
+    """CLI entry point. Parses, diagnoses, and prints report."""
     parsed = parse_resume(filepath)
     issues, suggestions, suggested_skills = analyze_parsed_resume(parsed, filepath)
     print_report(filepath, issues, suggestions, suggested_skills)

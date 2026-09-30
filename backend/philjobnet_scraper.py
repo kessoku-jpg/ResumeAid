@@ -1,35 +1,4 @@
-"""
-PhilJobNet Scraper
---------------------
-Fetches real, live job listings from PhilJobNet (philjobnet.gov.ph) —
-the Philippine Department of Labor and Employment's official public
-job board. Chosen over commercial PH job sites (JobStreet, Kalibrr,
-Bossjob) deliberately: those are private platforms whose data access
-is explicitly restricted to documented APIs/partnerships, and they
-run aggressive anti-bot protection. PhilJobNet is public-sector, has
-no robots.txt restricting access (verified), and its listings are
-meant to be publicly browsable without an account.
-
-IMPORTANT — VERIFIED BUT NOT YET TEST-RUN: every URL pattern, page
-structure, and text label used below was confirmed against the real,
-live site before writing this. What could NOT be verified from here:
-the actual HTML tag names/CSS classes, since this environment can only
-reach the site through a converted-text view, not raw HTML, and can't
-run this script network-side at all. The parsing below deliberately
-avoids guessing CSS classes — it searches for the literal heading TEXT
-("Job Description", "Work location", etc.) that's confirmed to exist
-on real pages, which is far more robust to not knowing the markup.
-Still: run this on your machine and tell me what happens. If a
-selector needs adjusting, that's expected on the first real run, not
-a sign something is fundamentally wrong.
-
-Install dependencies:
-    pip install requests beautifulsoup4
-
-Usage:
-    python philjobnet_scraper.py "cashier"
-    python philjobnet_scraper.py "software developer" 5
-"""
+"""Scrapes real job listings from PhilJobNet (philjobnet.gov.ph)."""
 
 import re
 import sys
@@ -72,12 +41,7 @@ def _get_soup(url):
 
 
 def _find_job_detail_links(search_results_soup, max_results):
-    """
-    Finds job detail page URLs from a search-results page, by matching
-    the URL PATTERN (confirmed real: /job-vacancies/job/{slug}-{id})
-    rather than any specific CSS class — this is resilient to markup
-    changes as long as the URL scheme itself stays the same.
-    """
+    """Extracts job detail URLs from the search results page."""
     pattern = re.compile(r"/job-vacancies/job/[\w-]+-\d+")
     seen = set()
     urls = []
@@ -96,13 +60,7 @@ def _find_job_detail_links(search_results_soup, max_results):
 
 
 def _extract_section_text(soup, heading_text, max_chars=2000):
-    """
-    Finds a tag whose own text exactly matches heading_text (case-
-    insensitive), then collects text from subsequent tags in document
-    order UNTIL hitting any other known section label — this is the
-    boundary-detection approach explained in the module docstring.
-    Returns "" if the heading isn't found at all.
-    """
+    """Extracts text for a specific section heading from the job page."""
     heading_lower = heading_text.strip().lower()
     other_labels = {lbl for lbl in KNOWN_SECTION_LABELS if lbl != heading_lower}
 
@@ -132,11 +90,7 @@ def _extract_section_text(soup, heading_text, max_chars=2000):
 
 
 def _parse_job_detail(url):
-    """
-    Fetches one job detail page and extracts a job dict matching the
-    schema used throughout this project: title, company, description,
-    url, location.
-    """
+    """Parses a single job detail page into the standard job schema."""
     soup = _get_soup(url)
 
     # Title: prefer the page's <h1>; fall back to deriving it from the
@@ -176,18 +130,7 @@ def _parse_job_detail(url):
 
 
 def _sanitize_query(query):
-    """
-    Cleans up a search query before it becomes a URL path segment.
-
-    Fixes a real confirmed bug: an inferred occupation title like
-    "Social Workers, All Other" caused a 404 — PhilJobNet's URL
-    routing appears not to handle a comma in the search path.
-    ", All Other" is a common O*NET catch-all-category naming
-    pattern (not something a real person would search for anyway),
-    so that suffix gets dropped specifically; any other remaining
-    commas/periods are stripped too, since they're not useful in a
-    plain keyword search regardless.
-    """
+    """Sanitizes search query for PhilJobNet URL routing."""
     query = re.sub(r",?\s*all other$", "", query, flags=re.IGNORECASE).strip()
     query = re.sub(r"[,.]", "", query)
     query = re.sub(r"\s+", " ", query).strip()
@@ -195,15 +138,7 @@ def _sanitize_query(query):
 
 
 def search_jobs(query, max_results=10):
-    """
-    Searches PhilJobNet for `query`, returns a list of job dicts in
-    the SAME schema job_scraper.py (JSearch) already uses — drop-in
-    compatible with pipeline.py, matching_engine.py, etc. Only
-    fetches the FIRST page of search results (pagination beyond that
-    uses ASP.NET Web Forms postback, which is a separate, more
-    complex mechanism — first-page results are enough to get real
-    live data flowing for this project).
-    """
+    """Searches PhilJobNet and returns standard job dicts."""
     clean_query = _sanitize_query(query)
     search_url = SEARCH_URL_TEMPLATE.format(query=quote(clean_query))
     search_soup = _get_soup(search_url)
