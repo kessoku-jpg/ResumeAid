@@ -7,6 +7,7 @@ and automatically derives search queries from resume skills.
 """
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from resume_parser import parse_resume
 from matching_engine import rank_jobs_for_resume, infer_job_title
@@ -133,9 +134,16 @@ def get_job_listings(search_query=None, country="ph", source="all", results_per_
         return SAMPLE_JOB_LISTINGS
 
     if source in ("all", "both"):
-        philjobnet_jobs = _try_fetch_philjobnet(search_query, results_per_source)
-        adzuna_jobs = _try_fetch_adzuna(search_query, country, results_per_source)
-        onlinejobs_jobs = _try_fetch_onlinejobs(search_query, results_per_source)
+        # Run all sources concurrently — total wait is the slowest source,
+        # not the sum of all three. Each _try_fetch_* already swallows its
+        # own errors and returns [], so .result() won't raise.
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            philjobnet_future = executor.submit(_try_fetch_philjobnet, search_query, results_per_source)
+            adzuna_future = executor.submit(_try_fetch_adzuna, search_query, country, results_per_source)
+            onlinejobs_future = executor.submit(_try_fetch_onlinejobs, search_query, results_per_source)
+            philjobnet_jobs = philjobnet_future.result()
+            adzuna_jobs = adzuna_future.result()
+            onlinejobs_jobs = onlinejobs_future.result()
         jobs = philjobnet_jobs + adzuna_jobs + onlinejobs_jobs
         if jobs:
             print(f"Combined {len(philjobnet_jobs)} PhilJobNet + {len(adzuna_jobs)} Adzuna + "

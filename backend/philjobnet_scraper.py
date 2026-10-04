@@ -2,7 +2,7 @@
 
 import re
 import sys
-import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 import requests
@@ -28,10 +28,10 @@ KNOWN_SECTION_LABELS = [
     "share job",
 ]
 
-# Politeness delay between requests to the job detail pages (seconds).
+# Max number of job detail pages fetched at the same time.
 # This is a public government server, not a rate-limited API — keep
-# this reasonable rather than hitting it as fast as possible.
-REQUEST_DELAY_SECONDS = 1.0
+# this small rather than hitting it as fast as possible.
+MAX_CONCURRENT_REQUESTS = 5
 
 
 def _get_soup(url):
@@ -147,17 +147,20 @@ def search_jobs(query, max_results=10):
     if not detail_urls:
         return []
 
-    jobs = []
-    for i, url in enumerate(detail_urls):
-        if i > 0:
-            time.sleep(REQUEST_DELAY_SECONDS)  # politeness delay between detail page fetches
+    def _safe_parse(url):
         try:
-            jobs.append(_parse_job_detail(url))
+            return _parse_job_detail(url)
         except requests.RequestException as e:
             print(f"Skipping {url} (request failed: {e})")
-            continue
+            return None
 
-    return jobs
+    # Fetch detail pages concurrently; executor.map preserves the
+    # original search-result order.
+    workers = min(MAX_CONCURRENT_REQUESTS, len(detail_urls))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(_safe_parse, detail_urls))
+
+    return [job for job in results if job is not None]
 
 
 if __name__ == "__main__":

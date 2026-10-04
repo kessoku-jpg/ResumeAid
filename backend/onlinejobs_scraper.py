@@ -3,6 +3,7 @@
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 import requests
@@ -133,17 +134,25 @@ def search_jobs(query, max_results=10):
     if not detail_urls:
         return []
 
-    jobs = []
-    for i, url in enumerate(detail_urls):
-        if i > 0:
-            time.sleep(REQUEST_DELAY_SECONDS)  # respects the site's Crawl-delay: 5
+    def _safe_parse(url):
         try:
-            jobs.append(_parse_job_detail(url))
+            return _parse_job_detail(url)
         except requests.RequestException as e:
             print(f"Skipping {url} (request failed: {e})")
-            continue
+            return None
 
-    return jobs
+    # Requests are still *started* REQUEST_DELAY_SECONDS apart (respects the
+    # site's Crawl-delay: 5), but each one runs in the background so we no
+    # longer wait for the previous download + parse before the next timer.
+    futures = []
+    with ThreadPoolExecutor(max_workers=len(detail_urls)) as executor:
+        for i, url in enumerate(detail_urls):
+            if i > 0:
+                time.sleep(REQUEST_DELAY_SECONDS)
+            futures.append(executor.submit(_safe_parse, url))
+        results = [f.result() for f in futures]
+
+    return [job for job in results if job is not None]
 
 
 if __name__ == "__main__":
