@@ -6,11 +6,17 @@ Defaults to fetching from all scrapers (PhilJobNet, Adzuna, OnlineJobs)
 and automatically derives search queries from resume skills.
 """
 
-import sys
+import argparse
+import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from resume_parser import parse_resume
 from matching_engine import rank_jobs_for_resume, infer_job_title
+
+logger = logging.getLogger("resumeaid.pipeline")
+
+DEFAULT_COUNTRY = "ph"
 
 try:
     from philjobnet_scraper import search_jobs as search_philjobnet
@@ -92,43 +98,64 @@ def build_search_query_from_resume(parsed_resume, max_skills=4):
 def _try_fetch_philjobnet(query, max_results):
     """Fetches PhilJobNet listings, returning [] on failure."""
     if not PHILJOBNET_AVAILABLE:
-        print("philjobnet_scraper.py not found or 'beautifulsoup4' not installed — skipping PhilJobNet")
+        logger.warning("philjobnet_scraper.py not found or 'beautifulsoup4' not installed — skipping PhilJobNet")
         return []
     try:
         return search_philjobnet(query, max_results=max_results)
     except Exception as e:
-        print(f"Couldn't fetch live PhilJobNet listings ({e})")
+        logger.warning("Couldn't fetch live PhilJobNet listings (%s)", e)
         return []
 
 
 def _try_fetch_adzuna(query, country, results_per_page):
     """Fetches Adzuna API listings, returning [] on failure."""
     if not JSEARCH_AVAILABLE:
-        print("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
+        logger.warning("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
         return []
     try:
         return search_jsearch(query, country=country, results_per_page=results_per_page)
     except Exception as e:
-        print(f"Couldn't fetch live Adzuna listings ({e})")
+        logger.warning("Couldn't fetch live Adzuna listings (%s)", e)
         return []
 
 
 def _try_fetch_onlinejobs(query, max_results):
     """Fetches OnlineJobs.ph listings, returning [] on failure."""
     if not ONLINEJOBS_AVAILABLE:
-        print("onlinejobs_scraper.py not found or 'beautifulsoup4' not installed — skipping OnlineJobs.ph")
+        logger.warning("onlinejobs_scraper.py not found or 'beautifulsoup4' not installed — skipping OnlineJobs.ph")
         return []
     try:
         return search_onlinejobs(query, max_results=max_results)
     except Exception as e:
-        print(f"Couldn't fetch live OnlineJobs.ph listings ({e})")
+        logger.warning("Couldn't fetch live OnlineJobs.ph listings (%s)", e)
         return []
 
 
-def get_job_listings(search_query=None, country="ph", source="all", results_per_source=10):
+def _normalize_key(text):
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def dedupe_jobs(jobs):
+    """Removes duplicate listings (same URL, or same title + company) across sources."""
+    seen_urls, seen_pairs, unique = set(), set(), []
+    for job in jobs:
+        url = (job.get("url") or "").strip().lower()
+        pair = (_normalize_key(job.get("title")), _normalize_key(job.get("company")))
+        if (url and url in seen_urls) or (pair[0] and pair in seen_pairs):
+            continue
+        if url:
+            seen_urls.add(url)
+        if pair[0]:
+            seen_pairs.add(pair)
+        unique.append(job)
+    return unique
+
+
+def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", results_per_source=10):
     """
     Returns aggregated job listings from the requested sources.
     Defaults to returning results from all available scrapers.
+    Returns SAMPLE_JOB_LISTINGS (identity-checkable) when nothing live is found.
     """
     if not search_query:
         return SAMPLE_JOB_LISTINGS
@@ -144,10 +171,10 @@ def get_job_listings(search_query=None, country="ph", source="all", results_per_
             philjobnet_jobs = philjobnet_future.result()
             adzuna_jobs = adzuna_future.result()
             onlinejobs_jobs = onlinejobs_future.result()
-        jobs = philjobnet_jobs + adzuna_jobs + onlinejobs_jobs
+        jobs = dedupe_jobs(philjobnet_jobs + adzuna_jobs + onlinejobs_jobs)
         if jobs:
-            print(f"Combined {len(philjobnet_jobs)} PhilJobNet + {len(adzuna_jobs)} Adzuna + "
-                  f"{len(onlinejobs_jobs)} OnlineJobs.ph listings ({len(jobs)} total)")
+            logger.info("Combined %d PhilJobNet + %d Adzuna + %d OnlineJobs.ph listings (%d unique)",
+                        len(philjobnet_jobs), len(adzuna_jobs), len(onlinejobs_jobs), len(jobs))
     elif source == "onlinejobs":
         jobs = _try_fetch_onlinejobs(search_query, results_per_source)
     elif source in ("adzuna", "jsearch"):
@@ -157,23 +184,21 @@ def get_job_listings(search_query=None, country="ph", source="all", results_per_
         jobs = _try_fetch_philjobnet(search_query, results_per_source)
 
     if not jobs:
-        print(f"No live results for '{search_query}' — using placeholder listings")
+        logger.warning("No live results for '%s' — using placeholder listings", search_query)
         return SAMPLE_JOB_LISTINGS
     return jobs
 
 
-def run_pipeline(resume_filepath, job_listings=None, search_query=None, country="us", source="all"):
+def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=DEFAULT_COUNTRY, source="all"):
     """
     Full pipeline: parses resume and ranks it against job listings.
     Automatically derives a search query if none is provided.
     """
-    print(f"Parsing resume: {resume_filepath}")
+    logger.info("Parsing resume")
     parsed_resume = parse_resume(resume_filepath)
 
-    print("\n--- Parsed resume summary ---")
-    print(f"Name: {parsed_resume.get('name')}")
-    print(f"Email: {parsed_resume.get('email')}")
-    print(f"Detected skills: {parsed_resume.get('skills')}")
+    # Don't log name/email/phone — resumes contain personal data.
+    logger.info("Detected %d skill(s)", len(parsed_resume.get("skills") or []))
 
     # Run diagnostics and temporarily apply suggested skills for matching
     health_check = {"issues": [], "suggestions": [], "suggested_skills": []}
@@ -190,34 +215,37 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
             for skill in suggested_skills:
                 if skill.lower() not in existing_lower:
                     parsed_resume.setdefault("skills", []).append(skill)
-            print(f"Auto-applied {len(suggested_skills)} suggested skill(s) for this matching run "
-                  f"(your resume file itself is unchanged).\n")
+            logger.info("Auto-applied %d suggested skill(s) for this matching run "
+                        "(the resume file itself is unchanged).", len(suggested_skills))
 
-    search_info = {"query": search_query, "confidence": None, "source": source}
+    search_info = {"query": search_query, "confidence": None, "source": source, "is_placeholder": False}
     if job_listings is None:
         query = search_query
         confidence = None
         if query is None:
             query, confidence = build_search_query_from_resume(parsed_resume)
             if query and confidence is not None:
-                print(f'\nInferred likely occupation from resume: "{query}" (confidence: {confidence:.0%})')
+                logger.info('Inferred likely occupation: "%s" (confidence: %.0f%%)', query, confidence * 100)
             elif query:
-                print(f'\nAuto-detected search query from resume\'s skills: "{query}"')
+                logger.info('Auto-detected search query from skills: "%s"', query)
             else:
-                print("\nNo usable skills detected to build a search query from")
-        search_info = {"query": query, "confidence": confidence, "source": source}
+                logger.info("No usable skills detected to build a search query from")
         job_listings = get_job_listings(query, country, source)
+        search_info = {
+            "query": query,
+            "confidence": confidence,
+            "source": source,
+            # Lets clients warn users that these aren't real live listings
+            "is_placeholder": job_listings is SAMPLE_JOB_LISTINGS,
+        }
 
-    print(f"\nMatching against {len(job_listings)} job listings...")
+    logger.info("Matching against %d job listings...", len(job_listings))
     ranked_results = rank_jobs_for_resume(parsed_resume, job_listings)
 
-    print("\n--- Ranked matches ---")
     for job in ranked_results:
-        print(f"\n{job['match_score']}% raw / {job['relative_score']}% relative  —  {job.get('title', 'Untitled listing')}"
-              f"{' at ' + job['company'] if job.get('company') else ''}")
-        print(f"   {job['comment']}")
-        if job.get("url"):
-            print(f"   {job['url']}")
+        logger.info("%s%% raw / %s%% relative — %s%s", job['match_score'], job['relative_score'],
+                    job.get('title', 'Untitled listing'),
+                    f" at {job['company']}" if job.get('company') else '')
 
     return {
         "parsed_resume": parsed_resume,
@@ -227,40 +255,36 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
     }
 
 
-def _parse_args(argv):
-    """Minimal CLI argument parser."""
-    if len(argv) < 1:
-        return None
-    resume_path = argv[0]
-    query = None
-    country = "us"
-    source = "all"
-
-    i = 1
-    while i < len(argv):
-        if argv[i] == "--query" and i + 1 < len(argv):
-            query = argv[i + 1]
-            i += 2
-        elif argv[i] == "--country" and i + 1 < len(argv):
-            country = argv[i + 1]
-            i += 2
-        elif argv[i] == "--source" and i + 1 < len(argv):
-            source = argv[i + 1]
-            i += 2
-        else:
-            i += 1
-
-    return resume_path, query, country, source
+def _parse_args(argv=None):
+    """CLI argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Parse a resume and rank live job listings against it.",
+        epilog="--country applies to the Adzuna source; 'ph' is not supported by Adzuna and auto-falls back to 'gb'.",
+    )
+    parser.add_argument("resume_path", help="Path to a .pdf or .docx resume")
+    parser.add_argument("--query", default=None,
+                        help="Custom search query (default: auto-derived from the resume)")
+    parser.add_argument("--country", default=DEFAULT_COUNTRY, help=f"Country code (default: {DEFAULT_COUNTRY})")
+    parser.add_argument("--source", default="all", choices=["all", "philjobnet", "adzuna", "onlinejobs"],
+                        help="Job source (default: all, merged and ranked together)")
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
-    parsed_args = _parse_args(sys.argv[1:])
-    if parsed_args is None:
-        print("Usage: python pipeline.py <path_to_resume.pdf_or_docx> [--query \"custom search\"] [--source all|philjobnet|adzuna|onlinejobs] [--country gb]")
-        print("Without --query, the search term is auto-derived from the resume's own detected skills.")
-        print("Default source is 'all' (PhilJobNet + Adzuna + OnlineJobs.ph, merged and ranked together).")
-        print("--country applies to the Adzuna source; 'ph' is not supported by Adzuna and auto-falls back to 'gb'.")
-        sys.exit(1)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    resume_path, query, country_code, source = parsed_args
-    run_pipeline(resume_path, search_query=query, country=country_code, source=source)
+    args = _parse_args()
+    result = run_pipeline(args.resume_path, search_query=args.query, country=args.country, source=args.source)
+
+    print("\n--- Ranked matches ---")
+    for job in result["ranked_results"]:
+        print(f"\n{job['match_score']}% raw / {job['relative_score']}% relative  —  {job.get('title', 'Untitled listing')}"
+              f"{' at ' + job['company'] if job.get('company') else ''}")
+        print(f"   {job['comment']}")
+        if job.get("url"):
+            print(f"   {job['url']}")

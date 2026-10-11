@@ -190,7 +190,7 @@
           <div class="upload-card">
             <div class="upload-card-header">
               <h2>Upload your resume</h2>
-              <p>Supported formats: PDF, DOC, DOCX &mdash; Max 10 MB</p>
+              <p>Supported formats: PDF, DOCX &mdash; Max 10 MB</p>
             </div>
 
             <!-- Drop zone -->
@@ -212,7 +212,9 @@
                 <p class="dz-primary" id="dz-primary">Drag &amp; drop your file here</p>
                 <p class="dz-secondary">or <span class="dz-link">click to browse</span></p>
               </div>
-              <input type="file" id="file-input" accept=".pdf,.doc,.docx" hidden />
+              <input type="file" id="file-input"
+                accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                hidden />
             </div>
 
             <!-- Actions row -->
@@ -302,6 +304,9 @@
             </select>
           </div>
         </div>
+
+        <!-- Shown when backend fell back to sample listings -->
+        <div class="matches-notice hidden" id="matches-notice" role="status"></div>
 
         <!-- Empty state -->
         <div class="empty-state" id="matches-empty">
@@ -408,6 +413,10 @@
               <div class="info-card">
                 <h3 class="card-section-title">Experience Summary</h3>
                 <p class="experience-text" id="resume-experience">No experience information detected.</p>
+              </div>
+              <div class="info-card">
+                <h3 class="card-section-title">Education</h3>
+                <p class="experience-text" id="resume-education">No education information detected.</p>
               </div>
             </div>
           </div>
@@ -724,8 +733,9 @@
         </button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc">Enter the country where you want to find job listings.</p>
-        <input type="text" class="text-input" id="country-input" placeholder="e.g. United Kingdom, Australia" />
+        <p class="modal-desc">Choose the country where you want to find job listings. Philippine job boards are always
+          included.</p>
+        <select class="text-input" id="country-input" aria-label="Search country"></select>
       </div>
       <div class="modal-footer modal-footer-row">
         <button class="btn-ghost" id="country-cancel">Cancel</button>

@@ -1,13 +1,28 @@
 // Main UI logic and API communication for ResumeAid
 'use strict';
 
-const API_BASE = 'http://localhost:5000';
+// Backend URL: override with window.RESUMEAID_API_BASE (set before app.js loads)
+// or localStorage 'ra_api'. Falls back to the local dev server.
+const API_BASE = (window.RESUMEAID_API_BASE || localStorage.getItem('ra_api') || 'http://localhost:5000').replace(/\/+$/, '');
+
+// Country codes understood by the backend (PH sources + Adzuna-supported markets)
+const COUNTRIES = {
+  ph: 'Philippines', us: 'United States', gb: 'United Kingdom', au: 'Australia',
+  ca: 'Canada', sg: 'Singapore', nz: 'New Zealand', in: 'India', de: 'Germany',
+  fr: 'France', nl: 'Netherlands', it: 'Italy', pl: 'Poland', at: 'Austria',
+  za: 'South Africa', br: 'Brazil',
+};
+
+function loadCountry() {
+  const saved = (localStorage.getItem('ra_country') || '').toLowerCase();
+  return COUNTRIES[saved] ? saved : 'ph';
+}
 
 // Global application state
 const state = {
   lastResponse: null,
   selectedFile: null,
-  country: localStorage.getItem('ra_country') || 'us',
+  country: loadCountry(),
   darkMode: localStorage.getItem('ra_dark') === 'true',
   analysisController: null,
 };
@@ -21,7 +36,8 @@ function init() {
   // Dark mode: apply immediately, no flash
   applyDark(state.darkMode, false);
   $('dark-mode-toggle').checked = state.darkMode;
-  $('country-display').textContent = state.country;
+  $('country-display').textContent = COUNTRIES[state.country];
+  populateCountrySelect();
 
   // Splash → app
   const splashEl = $('splash');
@@ -35,6 +51,27 @@ function init() {
   }, 2000);
 
   bindAll();
+  checkBackend();
+}
+
+// Warn early if the API isn't reachable, instead of failing after upload
+function checkBackend() {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  fetch(`${API_BASE}/api/health`, { signal: ctrl.signal })
+    .then(r => { if (!r.ok) throw new Error(); })
+    .catch(() => setTimeout(() => toast('Can’t reach the ResumeAid server. Is the backend running?', true), 2600))
+    .finally(() => clearTimeout(t));
+}
+
+function populateCountrySelect() {
+  const sel = $('country-input');
+  sel.innerHTML = '';
+  Object.entries(COUNTRIES).forEach(([code, name]) => {
+    const opt = document.createElement('option');
+    opt.value = code; opt.textContent = name;
+    sel.appendChild(opt);
+  });
 }
 
 // Attach DOM event listeners
@@ -99,6 +136,14 @@ function bindAll() {
   // About info modal
   $('about-ok').addEventListener('click', () => closeModal('modal-about'));
   $('modal-about').addEventListener('click', e => { if (e.target === $('modal-about')) closeModal('modal-about'); });
+
+  // Escape closes whichever dialog is open
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const openModalEl = [...$$('.modal-backdrop')].find(m => !m.classList.contains('hidden'));
+    if (openModalEl) { closeModal(openModalEl.id); return; }
+    if (!$('overlay-resume-check').classList.contains('hidden')) closeOverlay('overlay-resume-check');
+  });
 }
 
 // Handle navigating between UI sections
@@ -125,13 +170,15 @@ window.switchView = switchView;
 
 // Validate and handle selected files
 function onFile(file) {
+  // Backend only supports PDF and DOCX (legacy .doc can't be parsed)
   const ext = file.name.split('.').pop().toLowerCase();
-  const okTypes = ['application/pdf', 'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-  if (!okTypes.includes(file.type) && !['pdf', 'doc', 'docx'].includes(ext)) {
-    toast('Please select a PDF, DOC or DOCX file.', true);
+  if (!['pdf', 'docx'].includes(ext)) {
+    toast(ext === 'doc'
+      ? 'Legacy .doc files aren’t supported — please save as PDF or DOCX.'
+      : 'Please select a PDF or DOCX file.', true);
     return;
   }
+  if (file.size === 0) { toast('That file is empty.', true); return; }
   if (file.size > 10 * 1024 * 1024) { toast('File is too large (max 10 MB).', true); return; }
 
   state.selectedFile = file;
@@ -154,6 +201,7 @@ function clearFile() {
 // API communication and loading states
 function runAnalysis() {
   if (!state.selectedFile) { toast('Please select a file first.', true); return; }
+  if (state.analysisController) return; // already running
 
   setLoading(true);
   animateLoadingSteps();
@@ -164,18 +212,25 @@ function runAnalysis() {
 
   const ctrl = new AbortController();
   state.analysisController = ctrl;
-  const tId = setTimeout(() => ctrl.abort(), 120_000);
+  const tId = setTimeout(() => ctrl.abort(), 180_000);
 
   fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: fd, signal: ctrl.signal })
-    .then(r => {
-      clearTimeout(tId);
-      if (!r.ok) throw new Error(r.status >= 500 ? 'Server error — please try again later.' : 'Unexpected error — please try again.');
-      return r.json();
+    .then(async r => {
+      // Surface the server's own error message when it provides one
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        const fallback = r.status >= 500 ? 'Server error — please try again later.' : 'Unexpected error — please try again.';
+        throw new Error(body?.error || fallback);
+      }
+      if (!body) throw new Error('Invalid response from server.');
+      return body;
     })
     .then(data => {
       state.lastResponse = data;
-      setLoading(false);
       updateMatchBadge(data.matches?.length ?? 0);
+      if (data.search_info?.is_placeholder) {
+        toast('No live listings found right now — showing sample roles instead.', true);
+      }
       if (data.health_check?.issues?.length > 0) {
         showResumeCheck(data);
       } else {
@@ -183,9 +238,15 @@ function runAnalysis() {
       }
     })
     .catch(err => {
+      let msg = err.message || 'Network error.';
+      if (err.name === 'AbortError') msg = 'Request timed out — the server took too long.';
+      else if (err instanceof TypeError) msg = 'Can’t reach the server. Check that the backend is running.';
+      toast(msg, true);
+    })
+    .finally(() => {
       clearTimeout(tId);
+      state.analysisController = null;
       setLoading(false);
-      toast(err.name === 'AbortError' ? 'Request timed out.' : (err.message || 'Network error.'), true);
     });
 }
 
@@ -200,6 +261,8 @@ function setLoading(on) {
     bar.style.animation = 'none';
     void bar.offsetWidth;
     bar.style.animation = '';
+  } else {
+    clearTimeout(stepTimer);
   }
 }
 
@@ -209,15 +272,17 @@ function animateLoadingSteps() {
   const steps = $$('.loading-step');
   steps.forEach((s, i) => { s.classList.toggle('active', i === 0); s.classList.remove('done'); });
   let cur = 0;
+  // Parsing is quick; scraping is the slow part, so the step timings are uneven
+  const delays = [6000, 25000];
   function next() {
     if (cur < steps.length - 1) {
       steps[cur].classList.remove('active'); steps[cur].classList.add('done');
       cur++;
       steps[cur].classList.add('active');
-      stepTimer = setTimeout(next, 28000);
+      if (cur < delays.length) stepTimer = setTimeout(next, delays[cur]);
     }
   }
-  stepTimer = setTimeout(next, 28000);
+  stepTimer = setTimeout(next, delays[0]);
 }
 
 function updateMatchBadge(count) {
@@ -280,7 +345,10 @@ function renderMatches() {
   if (!data?.matches?.length) {
     grid.classList.add('hidden');
     empty.classList.remove('hidden');
-    sub.textContent = 'Upload your resume to see live job matches.';
+    $('matches-notice').classList.add('hidden');
+    sub.textContent = data
+      ? 'No matching roles found. Try a different country in Settings.'
+      : 'Upload your resume to see live job matches.';
     sw.classList.add('hidden');
     return;
   }
@@ -297,7 +365,17 @@ function renderMatches() {
     matches.sort((a, b) => scoreNum(b) - scoreNum(a));
   }
 
-  sub.textContent = `${matches.length} live role${matches.length === 1 ? '' : 's'} matched to your resume`;
+  const info = data.search_info || {};
+  const placeholder = !!info.is_placeholder;
+  const noun = placeholder ? 'sample role' : 'live role';
+  const query = info.query ? ` for “${info.query}”` : '';
+  sub.textContent = `${matches.length} ${noun}${matches.length === 1 ? '' : 's'} matched${query}`;
+
+  const notice = $('matches-notice');
+  notice.classList.toggle('hidden', !placeholder);
+  if (placeholder) {
+    notice.textContent = 'We couldn’t fetch live listings right now, so these are example roles to show how matching works. Try again later.';
+  }
 
   grid.innerHTML = '';
   matches.forEach((m, i) => {
@@ -306,9 +384,10 @@ function renderMatches() {
   });
 }
 
+// Backend always returns match_score as a 0–100 percentage
 function scoreNum(m) {
-  const raw = m.match_score ?? 0;
-  return raw <= 1 ? raw * 100 : raw;
+  const n = Number(m.match_score);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
 }
 
 function buildMatchCard(match, idx) {
@@ -360,8 +439,12 @@ function showMatchDetail(match) {
   $('modal-comment').textContent = match.comment || 'Match based on your resume and the role requirements.';
 
   const listBtn = $('btn-view-listing');
-  if (match.url) { listBtn.href = match.url; listBtn.style.display = ''; }
-  else { listBtn.style.display = 'none'; }
+  if (match.url && /^https?:\/\//i.test(match.url)) {
+    listBtn.href = match.url;
+    listBtn.target = '_blank';
+    listBtn.rel = 'noopener noreferrer';
+    listBtn.style.display = '';
+  } else { listBtn.style.display = 'none'; }
 
   // Animate score ring  circumference = 2πr = 2π*50 ≈ 314
   const ringFill = $('score-ring-fill');
@@ -455,6 +538,7 @@ function renderResume() {
   });
 
   $('resume-experience').textContent = s.experience || 'No experience information detected.';
+  $('resume-education').textContent = s.education || 'No education information detected.';
 
   // ── Inline resume check ──────────────────────────────────
   const hc = data.health_check;
@@ -512,11 +596,11 @@ function openCountryModal() {
 }
 
 function saveCountry() {
-  const v = $('country-input').value.trim();
-  if (v) {
+  const v = $('country-input').value;
+  if (COUNTRIES[v]) {
     state.country = v;
     localStorage.setItem('ra_country', v);
-    $('country-display').textContent = v;
+    $('country-display').textContent = COUNTRIES[v];
     toast('Country saved.');
   }
   closeModal('modal-country');
