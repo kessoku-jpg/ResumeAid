@@ -44,33 +44,247 @@ except ImportError:
 
 
 # Fallback placeholder listings if APIs fail or return nothing.
+# Spans broad industries so any resume gets a meaningful spread of scores.
+# Keep this a single module-level list: run_pipeline() identity-checks it
+# (`is SAMPLE_JOB_LISTINGS`) to flag results as placeholders.
 SAMPLE_JOB_LISTINGS = [
+    # --- Information Technology ---
     {
-        "title": "Frontend Developer",
+        "title": "Full-Stack Web Developer",
         "company": "Example Tech Co.",
+        "location": "Makati City, Metro Manila",
         "description": (
-            "Looking for a front-end developer experienced in React and "
-            "modern JavaScript frameworks. Comfortable working in an "
-            "Agile team environment with sprint planning."
+            "Build and maintain web applications using JavaScript, React, "
+            "Node.js, Python, and SQL databases. Experience with REST APIs, "
+            "Git version control, Docker, and Agile/Scrum teams is a plus."
         ),
         "url": "",
     },
     {
-        "title": "Data Entry Clerk",
+        "title": "IT Support Specialist",
+        "company": "Example Systems Inc.",
+        "location": "Quezon City, Metro Manila",
+        "description": (
+            "Provide technical support and troubleshooting for hardware, "
+            "software, and network issues. Install and configure Windows, "
+            "Microsoft Office, printers, and LAN/Wi-Fi. Strong customer "
+            "service and documentation skills required."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Data Analyst",
+        "company": "Example Analytics Group",
+        "location": "Taguig City, Metro Manila",
+        "description": (
+            "Analyze business data using Excel, SQL, and Python. Build "
+            "dashboards and reports in Power BI or Tableau, perform "
+            "statistical analysis, and present insights to stakeholders."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Graphic Designer",
+        "company": "Example Creative Studio",
+        "location": "Remote",
+        "description": (
+            "Create visual content for social media, print, and web using "
+            "Adobe Photoshop, Illustrator, InDesign, and Canva. Knowledge "
+            "of branding, typography, layout, and basic video editing."
+        ),
+        "url": "",
+    },
+    # --- Business, Admin & BPO ---
+    {
+        "title": "Customer Service Representative",
+        "company": "Example Contact Center",
+        "location": "Pasig City, Metro Manila",
+        "description": (
+            "Handle inbound calls, emails, and chat for international "
+            "clients. Excellent English communication, active listening, "
+            "problem solving, and CRM data entry. Willing to work night "
+            "shifts. Fresh graduates welcome."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Administrative Assistant",
         "company": "Example Admin Services",
+        "location": "Cebu City, Cebu",
         "description": (
-            "Seeking a detail-oriented data entry clerk for manual "
-            "spreadsheet work. No programming experience required."
+            "Manage schedules, filing, correspondence, and office supplies. "
+            "Proficient in Microsoft Word, Excel, and Google Workspace. "
+            "Strong organization, time management, and data entry skills."
         ),
         "url": "",
     },
     {
-        "title": "Backend / Full-Stack Developer",
-        "company": "Example Software Inc.",
+        "title": "Virtual Assistant",
+        "company": "Example Remote Staffing",
+        "location": "Remote",
         "description": (
-            "Full-stack role requiring Python backend experience, SQL "
-            "databases, and containerization with Docker. Bonus if "
-            "you've used REST APIs."
+            "Support overseas clients with email management, calendar "
+            "scheduling, research, social media posting, and bookkeeping "
+            "tasks. Self-motivated with reliable internet and good written "
+            "English."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Human Resources Assistant",
+        "company": "Example People Solutions",
+        "location": "Mandaluyong City, Metro Manila",
+        "description": (
+            "Assist with recruitment, onboarding, payroll, timekeeping, and "
+            "employee records. Knowledge of Philippine labor law, SSS, "
+            "PhilHealth, and Pag-IBIG processes. Good interpersonal skills."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Sales and Marketing Associate",
+        "company": "Example Retail Brands",
+        "location": "Davao City, Davao del Sur",
+        "description": (
+            "Generate leads, meet sales targets, and build client "
+            "relationships. Plan digital marketing campaigns, social media "
+            "content, and product promotions. Strong negotiation and "
+            "presentation skills."
+        ),
+        "url": "",
+    },
+    # --- Finance & Accounting ---
+    {
+        "title": "Accounting Staff / Bookkeeper",
+        "company": "Example Finance Corp.",
+        "location": "Makati City, Metro Manila",
+        "description": (
+            "Prepare journal entries, bank reconciliations, accounts "
+            "payable and receivable, and financial statements. Familiar "
+            "with QuickBooks or Xero, Excel, and BIR tax filing. CPA or "
+            "accountancy graduate preferred."
+        ),
+        "url": "",
+    },
+    # --- Healthcare ---
+    {
+        "title": "Staff Nurse",
+        "company": "Example Medical Center",
+        "location": "Manila, Metro Manila",
+        "description": (
+            "Provide patient care, administer medication, monitor vital "
+            "signs, and maintain medical records. Licensed Registered Nurse "
+            "with BLS/ACLS certification. Strong communication and "
+            "teamwork in a hospital setting."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Medical Technologist",
+        "company": "Example Diagnostics Laboratory",
+        "location": "Iloilo City, Iloilo",
+        "description": (
+            "Perform laboratory tests including hematology, clinical "
+            "chemistry, and microbiology. Operate and calibrate lab "
+            "equipment, ensure quality control, and record results "
+            "accurately. Licensed RMT required."
+        ),
+        "url": "",
+    },
+    # --- Education ---
+    {
+        "title": "Elementary / High School Teacher",
+        "company": "Example Learning Academy",
+        "location": "Baguio City, Benguet",
+        "description": (
+            "Plan lessons, deliver classroom instruction, assess student "
+            "progress, and manage classroom behavior. LET passer with "
+            "strong communication, curriculum development, and "
+            "online teaching experience preferred."
+        ),
+        "url": "",
+    },
+    # --- Engineering & Technical ---
+    {
+        "title": "Civil Engineer",
+        "company": "Example Construction & Development",
+        "location": "Cavite",
+        "description": (
+            "Prepare structural plans, cost estimates, and project "
+            "schedules. Supervise construction sites, ensure safety "
+            "compliance, and coordinate with contractors. AutoCAD and "
+            "licensed Civil Engineer required."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Electrician",
+        "company": "Example Building Services",
+        "location": "Laguna",
+        "description": (
+            "Install, maintain, and repair electrical wiring, panels, and "
+            "lighting systems in residential and commercial buildings. "
+            "Read blueprints and follow safety codes. TESDA NC II "
+            "certification preferred."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Production Operator",
+        "company": "Example Manufacturing Inc.",
+        "location": "Batangas",
+        "description": (
+            "Operate production machines, perform quality inspections, and "
+            "follow standard operating procedures and 5S. Able to work "
+            "shifting schedules. High school or vocational graduate."
+        ),
+        "url": "",
+    },
+    # --- Logistics & Transport ---
+    {
+        "title": "Warehouse and Logistics Coordinator",
+        "company": "Example Logistics Hub",
+        "location": "Valenzuela City, Metro Manila",
+        "description": (
+            "Manage inventory, receiving, dispatching, and shipment "
+            "tracking. Use Excel and inventory management systems, "
+            "coordinate with delivery drivers and suppliers. Forklift "
+            "experience is a plus."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Delivery Driver",
+        "company": "Example Express Couriers",
+        "location": "Cagayan de Oro, Misamis Oriental",
+        "description": (
+            "Deliver parcels safely and on time, plan routes, and maintain "
+            "vehicle condition. Valid professional driver's license with "
+            "knowledge of local roads and good customer service."
+        ),
+        "url": "",
+    },
+    # --- Hospitality & Food Service ---
+    {
+        "title": "Hotel Front Desk Officer",
+        "company": "Example Resort & Hotel",
+        "location": "Boracay, Aklan",
+        "description": (
+            "Handle guest check-in and check-out, reservations, inquiries, "
+            "and complaints. Strong customer service, cash handling, and "
+            "communication skills. Hospitality or tourism graduate preferred."
+        ),
+        "url": "",
+    },
+    {
+        "title": "Cook / Kitchen Staff",
+        "company": "Example Restaurant Group",
+        "location": "Pampanga",
+        "description": (
+            "Prepare and cook menu items, maintain food safety and "
+            "sanitation standards, manage kitchen inventory, and work "
+            "efficiently in a fast-paced team. Culinary training or TESDA "
+            "Cookery NC II is an advantage."
         ),
         "url": "",
     },

@@ -21,7 +21,22 @@ from sentence_transformers import SentenceTransformer, util
 # =======================================================================
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-model = SentenceTransformer(MODEL_NAME)
+
+
+def _load_model(name):
+    """
+    Loads from the local Hugging Face cache first so startup works offline
+    and doesn't ping the Hub. Only downloads (one-time, ~90 MB) if the
+    model isn't cached yet.
+    """
+    try:
+        return SentenceTransformer(name, local_files_only=True)
+    except Exception:
+        print(f"[matching_engine] '{name}' not cached locally — downloading (one-time, needs internet)...")
+        return SentenceTransformer(name)
+
+
+model = _load_model(MODEL_NAME)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 

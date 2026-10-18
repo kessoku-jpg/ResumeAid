@@ -4,14 +4,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ResumeAid — Match smarter, not harder</title>
+  <title>ResumeAid — Resume-to-job matching for Filipino job seekers</title>
   <meta name="description"
-    content="ResumeAid uses AI to analyse your resume against live job listings and delivers an instant compatibility score. Upload your PDF or DOCX and get matched in seconds." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap"
-    rel="stylesheet" />
+    content="ResumeAid compares the meaning of your resume with live listings from PhilJobNet, OnlineJobs.ph and Adzuna using Sentence-BERT, then scores each role on skills, experience and title." />
+  <!-- IBM Plex is self-hosted (see @font-face in style.css) so the UI works offline -->
+  <link rel="preload" href="fonts/plex-sans-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/plex-cond-600-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -21,22 +19,15 @@
   <div id="splash" class="splash">
     <div class="splash-inner">
       <div class="splash-logo-wrap">
-        <svg class="splash-icon" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="56" height="56" rx="14" fill="url(#sg)" />
-          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
-            stroke-linecap="round" />
-          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
-          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          <defs>
-            <linearGradient id="sg" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#00B4A6" />
-              <stop offset="1" stop-color="#0097A7" />
-            </linearGradient>
-          </defs>
+        <svg class="splash-icon" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="56" height="56" rx="8" fill="#1D5741" />
+          <rect x="10" y="19" width="36" height="10" rx="1.5" fill="#F3D45A" />
+          <path d="M14 14h24M14 34h20M14 44h14" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+          <path d="M14 24h28" stroke="#1B2226" stroke-width="3" stroke-linecap="round" />
         </svg>
       </div>
       <h1 class="splash-name">ResumeAid</h1>
-      <p class="splash-tag">Match smarter, not harder</p>
+      <p class="splash-tag">Resume-to-job matching for Filipino job seekers</p>
       <div class="splash-progress">
         <div id="splash-fill"></div>
       </div>
@@ -50,18 +41,11 @@
     <aside class="sidebar" id="sidebar">
       <!-- Logo -->
       <div class="sidebar-logo">
-        <svg class="logo-icon" viewBox="0 0 56 56" fill="none">
-          <rect width="56" height="56" rx="14" fill="url(#lg)" />
-          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
-            stroke-linecap="round" />
-          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
-          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          <defs>
-            <linearGradient id="lg" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#00B4A6" />
-              <stop offset="1" stop-color="#0097A7" />
-            </linearGradient>
-          </defs>
+        <svg class="logo-icon" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+          <rect width="56" height="56" rx="8" fill="#1D5741" />
+          <rect x="10" y="19" width="36" height="10" rx="1.5" fill="#F3D45A" />
+          <path d="M14 14h24M14 34h20M14 44h14" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+          <path d="M14 24h28" stroke="#1B2226" stroke-width="3" stroke-linecap="round" />
         </svg>
         <span class="logo-text">ResumeAid</span>
       </div>
@@ -116,18 +100,11 @@
     <!-- Mobile top bar -->
     <header class="mobile-header" id="mobile-header">
       <div class="mobile-logo">
-        <svg width="28" height="28" viewBox="0 0 56 56" fill="none">
-          <rect width="56" height="56" rx="12" fill="url(#mhg)" />
-          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
-            stroke-linecap="round" />
-          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
-          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          <defs>
-            <linearGradient id="mhg" x1="0" y1="0" x2="56" y2="56">
-              <stop stop-color="#00B4A6" />
-              <stop offset="1" stop-color="#0097A7" />
-            </linearGradient>
-          </defs>
+        <svg width="28" height="28" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+          <rect width="56" height="56" rx="8" fill="#1D5741" />
+          <rect x="10" y="19" width="36" height="10" rx="1.5" fill="#F3D45A" />
+          <path d="M14 14h24M14 34h20M14 44h14" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+          <path d="M14 24h28" stroke="#1B2226" stroke-width="3" stroke-linecap="round" />
         </svg>
         <span>ResumeAid</span>
       </div>
@@ -144,44 +121,52 @@
         <!-- Hero banner -->
         <div class="upload-hero">
           <div class="upload-hero-text">
-            <div class="hero-eyebrow">AI-Powered Job Matching</div>
-            <h1 class="hero-title">Find your perfect role — <span class="hero-accent">instantly</span></h1>
-            <p class="hero-subtitle">Upload your resume and we'll scan live job listings to score your compatibility
-              with open roles in real time.</p>
+            <p class="hero-eyebrow">Live listings from PhilJobNet, OnlineJobs.ph and Adzuna</p>
+            <h1 class="hero-title">Matched on meaning, not keywords.</h1>
+            <p class="hero-subtitle">Upload your resume and ResumeAid compares what your experience describes with
+              live job listings, so a role can match even when it's worded differently from your resume.</p>
+            <!-- Facts about how the matcher works (see backend/pipeline.py and matching_engine.py) -->
             <div class="hero-stats">
-              <div class="stat"><span class="stat-num">10K+</span><span class="stat-lbl">Jobs Analysed</span></div>
+              <div class="stat"><span class="stat-num">3</span><span class="stat-lbl">Job boards searched at once</span></div>
               <div class="stat-divider"></div>
-              <div class="stat"><span class="stat-num">94%</span><span class="stat-lbl">Match Accuracy</span></div>
+              <div class="stat"><span class="stat-num">30</span><span class="stat-lbl">Listings scored per run, max</span></div>
               <div class="stat-divider"></div>
-              <div class="stat"><span class="stat-num">&lt;60s</span><span class="stat-lbl">Avg. Response</span></div>
+              <div class="stat"><span class="stat-num">MiniLM</span><span class="stat-lbl">Sentence-BERT model</span></div>
             </div>
           </div>
           <div class="upload-hero-visual">
-            <!-- Floating card decorations -->
-            <div class="deco-card deco-card-1">
-              <div class="deco-score">87%</div>
-              <div class="deco-label">Match Score</div>
-            </div>
-            <div class="deco-card deco-card-2">
-              <div class="deco-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00B4A6" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+            <!-- One static example: why matching on meaning beats matching on words (replaces the floating deco-cards) -->
+            <figure class="specimen">
+              <figcaption class="specimen-cap">Example</figcaption>
+              <div class="specimen-row">
+                <span class="specimen-src">Your resume says</span>
+                <p class="specimen-text">“Answered phone inquiries from clients”</p>
               </div>
-              <div class="deco-label">Resume Analysed</div>
-            </div>
-            <div class="deco-card deco-card-3">
-              <div class="deco-mini-bar">
-                <div style="width:78%"></div>
+              <div class="specimen-row">
+                <span class="specimen-src">The job is</span>
+                <p class="specimen-text">“Customer Service Representative”</p>
               </div>
-              <div class="deco-mini-bar">
-                <div style="width:55%"></div>
-              </div>
-              <div class="deco-mini-bar">
-                <div style="width:91%"></div>
-              </div>
-            </div>
+              <dl class="specimen-result">
+                <div class="specimen-verdict">
+                  <dt>Keyword search</dt>
+                  <dd class="specimen-outcome">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                      stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                    No match
+                  </dd>
+                  <dd class="specimen-why">No words in common</dd>
+                </div>
+                <div class="specimen-verdict is-hit">
+                  <dt>ResumeAid</dt>
+                  <dd class="specimen-outcome">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                    Match
+                  </dd>
+                  <dd class="specimen-why">Same kind of work</dd>
+                </div>
+              </dl>
+            </figure>
           </div>
         </div>
 
@@ -190,7 +175,7 @@
           <div class="upload-card">
             <div class="upload-card-header">
               <h2>Upload your resume</h2>
-              <p>Supported formats: PDF, DOCX &mdash; Max 10 MB</p>
+              <p>PDF or DOCX, up to 10 MB. Your file is only used for this match.</p>
             </div>
 
             <!-- Drop zone -->
@@ -270,20 +255,20 @@
               <div class="step-card">
                 <div class="step-num">01</div>
                 <h4>Upload</h4>
-                <p>Drop your resume in PDF or DOCX format. We parse your skills, experience, and education
-                  automatically.</p>
+                <p>Drop your resume as a PDF or DOCX. We pull out your skills, experience and education, and
+                  flag anything that's hard to read.</p>
               </div>
               <div class="step-card">
                 <div class="step-num">02</div>
                 <h4>Analyse</h4>
-                <p>Our AI scans thousands of live job listings and checks compatibility with your profile in real time.
-                </p>
+                <p>We search PhilJobNet, OnlineJobs.ph and Adzuna for roles that fit, then compare each listing's
+                  meaning with your resume using Sentence-BERT.</p>
               </div>
               <div class="step-card">
                 <div class="step-num">03</div>
                 <h4>Match</h4>
-                <p>Get a ranked list of the best-fitting roles with a compatibility score and actionable insights for
-                  each.</p>
+                <p>See the roles ranked by score, with a breakdown for skills, experience and job title, plus
+                  the keywords you share.</p>
               </div>
             </div>
           </div>
@@ -713,8 +698,17 @@
         </div>
       </div>
       <div class="modal-footer">
-        <a class="btn-primary" id="btn-view-listing" href="#" target="_blank" rel="noopener noreferrer">View listing
-          ↗</a>
+        <a class="btn-primary" id="btn-view-listing" href="#" target="_blank" rel="noopener noreferrer">
+          Open original listing
+          <!-- External-link icon: signals the listing opens on the source job board in a new tab -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <path d="M15 3h6v6" />
+            <path d="M10 14 21 3" />
+          </svg>
+          <span class="visually-hidden">(opens in a new tab)</span>
+        </a>
       </div>
     </div>
   </div>
@@ -748,23 +742,17 @@
   <div class="modal-backdrop hidden" id="modal-about">
     <div class="modal modal-sm about-modal" role="dialog" aria-modal="true" aria-labelledby="about-modal-title">
       <div class="about-icon-wrap">
-        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
-          <rect width="56" height="56" rx="16" fill="url(#abg)" />
-          <path d="M13 15h20M13 21h28M13 27h17M13 33h22M13 39h13" stroke="white" stroke-width="2.4"
-            stroke-linecap="round" />
-          <circle cx="42" cy="37" r="10" fill="#0A1E38" />
-          <path d="M38 37l3 3 5-5" stroke="#00C4B4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-          <defs>
-            <linearGradient id="abg" x1="0" y1="0" x2="56" y2="56">
-              <stop stop-color="#00B4A6" />
-              <stop offset="1" stop-color="#0097A7" />
-            </linearGradient>
-          </defs>
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+          <rect width="56" height="56" rx="8" fill="#1D5741" />
+          <rect x="10" y="19" width="36" height="10" rx="1.5" fill="#F3D45A" />
+          <path d="M14 14h24M14 34h20M14 44h14" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" />
+          <path d="M14 24h28" stroke="#1B2226" stroke-width="3" stroke-linecap="round" />
         </svg>
       </div>
       <h2 class="modal-title" id="about-modal-title">ResumeAid</h2>
       <p class="modal-version">Version 1.0</p>
-      <p class="modal-tagline">Match smarter, not harder.</p>
+      <p class="modal-tagline">Resume-to-job matching for Filipino job seekers, built by CS students. Uses
+        Sentence-BERT (all-MiniLM-L6-v2) with listings from PhilJobNet, OnlineJobs.ph and Adzuna.</p>
       <button class="btn-primary" id="about-ok">Got it</button>
     </div>
   </div>
