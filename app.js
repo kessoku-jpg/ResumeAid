@@ -99,7 +99,8 @@ function bindAll() {
   $('file-pill-remove').addEventListener('click', e => { e.stopPropagation(); clearFile(); });
 
   // Start resume analysis
-  $('btn-analyse').addEventListener('click', runAnalysis);
+  $('btn-analyse').addEventListener('click', () => runAnalysis(false));
+  $('btn-refresh-listings').addEventListener('click', () => runAnalysis(true));
 
   // Resume health check overlay
   $('rc-close').addEventListener('click', () => closeOverlay('overlay-resume-check'));
@@ -199,7 +200,7 @@ function clearFile() {
 }
 
 // API communication and loading states
-function runAnalysis() {
+function runAnalysis(forceRefresh = false) {
   if (!state.selectedFile) { toast('Please select a file first.', true); return; }
   if (state.analysisController) return; // already running
 
@@ -209,6 +210,9 @@ function runAnalysis() {
   const fd = new FormData();
   fd.append('resume', state.selectedFile, state.selectedFile.name);
   fd.append('country', state.country);
+  if (forceRefresh) {
+    fd.append('refresh', '1');
+  }
 
   const ctrl = new AbortController();
   state.analysisController = ctrl;
@@ -370,6 +374,12 @@ function renderMatches() {
   const noun = placeholder ? 'sample role' : 'live role';
   const query = info.query ? ` for “${info.query}”` : '';
   sub.textContent = `${matches.length} ${noun}${matches.length === 1 ? '' : 's'} matched${query}`;
+
+  const isCached = !!info.from_cache;
+  const cacheBadge = $('cache-badge');
+  const refreshBtn = $('btn-refresh-listings');
+  if (cacheBadge) cacheBadge.classList.toggle('hidden', !isCached || placeholder);
+  if (refreshBtn) refreshBtn.classList.toggle('hidden', placeholder);
 
   const notice = $('matches-notice');
   notice.classList.toggle('hidden', !placeholder);

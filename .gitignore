@@ -16,3 +16,6 @@ Thumbs.db
 
 # Logs / temp
 *.log
+.cache/
+*.sqlite3
+*.db

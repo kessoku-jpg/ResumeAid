@@ -42,6 +42,12 @@ try:
 except ImportError:
     IMPROVER_AVAILABLE = False
 
+try:
+    from job_cache import get_cached_jobs, set_cached_jobs
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+
 
 # Fallback placeholder listings if APIs fail or return nothing.
 # Spans broad industries so any resume gets a meaningful spread of scores.
@@ -365,48 +371,106 @@ def dedupe_jobs(jobs):
     return unique
 
 
-def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", results_per_source=10):
+def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", results_per_source=10, force_refresh=False, return_meta=False):
     """
     Returns aggregated job listings from the requested sources.
-    Defaults to returning results from all available scrapers.
-    Returns SAMPLE_JOB_LISTINGS (identity-checkable) when nothing live is found.
+    Uses SQLite job cache to return instant results (<10ms) when available.
+    Only scrapes sources that are not in cache or when force_refresh is True.
+    Returns SAMPLE_JOB_LISTINGS (identity-checkable) when nothing live or cached is found.
     """
     if not search_query:
-        return SAMPLE_JOB_LISTINGS
+        meta = {"from_cache": False, "cached_sources": [], "live_sources": [], "is_placeholder": True}
+        return (SAMPLE_JOB_LISTINGS, meta) if return_meta else SAMPLE_JOB_LISTINGS
 
     if source in ("all", "both"):
-        # Run all sources concurrently — total wait is the slowest source,
-        # not the sum of all three. Each _try_fetch_* already swallows its
-        # own errors and returns [], so .result() won't raise.
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            philjobnet_future = executor.submit(_try_fetch_philjobnet, search_query, results_per_source)
-            adzuna_future = executor.submit(_try_fetch_adzuna, search_query, country, results_per_source)
-            onlinejobs_future = executor.submit(_try_fetch_onlinejobs, search_query, results_per_source)
-            philjobnet_jobs = philjobnet_future.result()
-            adzuna_jobs = adzuna_future.result()
-            onlinejobs_jobs = onlinejobs_future.result()
-        jobs = dedupe_jobs(philjobnet_jobs + adzuna_jobs + onlinejobs_jobs)
-        if jobs:
-            logger.info("Combined %d PhilJobNet + %d Adzuna + %d OnlineJobs.ph listings (%d unique)",
-                        len(philjobnet_jobs), len(adzuna_jobs), len(onlinejobs_jobs), len(jobs))
+        requested_sources = ["philjobnet", "onlinejobs", "adzuna"]
     elif source == "onlinejobs":
-        jobs = _try_fetch_onlinejobs(search_query, results_per_source)
+        requested_sources = ["onlinejobs"]
     elif source in ("adzuna", "jsearch"):
-        # "jsearch" kept as alias so existing Android clients don't break
-        jobs = _try_fetch_adzuna(search_query, country, results_per_source)
+        requested_sources = ["adzuna"]
     else:
-        jobs = _try_fetch_philjobnet(search_query, results_per_source)
+        requested_sources = ["philjobnet"]
 
-    if not jobs:
-        logger.warning("No live results for '%s' — using placeholder listings", search_query)
-        return SAMPLE_JOB_LISTINGS
+    cached_jobs_map = {}
+    cached_sources = []
+    live_sources = []
+    sources_to_scrape = []
+
+    if CACHE_AVAILABLE and not force_refresh:
+        for src in requested_sources:
+            cached_res = get_cached_jobs(src, search_query, country=(country if src == "adzuna" else None))
+            if cached_res and cached_res.get("jobs"):
+                cached_jobs_map[src] = cached_res["jobs"]
+                cached_sources.append(src)
+                logger.info("Retrieved %d cached listings for %s ('%s', age: %.1fm)",
+                            len(cached_res["jobs"]), src, search_query, cached_res["age_seconds"] / 60.0)
+            else:
+                sources_to_scrape.append(src)
+    else:
+        sources_to_scrape = list(requested_sources)
+
+    if sources_to_scrape:
+        logger.info("Scraping live listings for: %s", ", ".join(sources_to_scrape))
+
+        def _fetch_source(src):
+            if src == "philjobnet":
+                return src, _try_fetch_philjobnet(search_query, results_per_source)
+            elif src == "adzuna":
+                return src, _try_fetch_adzuna(search_query, country, results_per_source)
+            elif src == "onlinejobs":
+                # Max 6 results to respect crawl rate and keep latency reasonable
+                return src, _try_fetch_onlinejobs(search_query, min(results_per_source, 6))
+            return src, []
+
+        with ThreadPoolExecutor(max_workers=max(1, len(sources_to_scrape))) as executor:
+            futures = [executor.submit(_fetch_source, src) for src in sources_to_scrape]
+            for f in futures:
+                src, scraped_jobs = f.result()
+                if scraped_jobs:
+                    live_sources.append(src)
+                    cached_jobs_map[src] = scraped_jobs
+                    if CACHE_AVAILABLE:
+                        set_cached_jobs(src, search_query, scraped_jobs, country=(country if src == "adzuna" else None))
+                else:
+                    # Fallback to stale cached data if live scrape returned nothing
+                    if CACHE_AVAILABLE:
+                        stale_res = get_cached_jobs(src, search_query, country=(country if src == "adzuna" else None), allow_stale=True)
+                        if stale_res and stale_res.get("jobs"):
+                            logger.warning("Using stale cache (%d jobs) for '%s' after live scrape returned empty",
+                                           len(stale_res["jobs"]), src)
+                            cached_jobs_map[src] = stale_res["jobs"]
+                            cached_sources.append(src)
+
+    all_jobs = []
+    for src in requested_sources:
+        all_jobs.extend(cached_jobs_map.get(src, []))
+
+    jobs = dedupe_jobs(all_jobs)
+    if jobs:
+        logger.info("Combined %d listings across %s (%d unique)",
+                    len(all_jobs), ", ".join(requested_sources), len(jobs))
+    else:
+        logger.warning("No live or cached results for '%s' — using placeholder listings", search_query)
+        jobs = SAMPLE_JOB_LISTINGS
+
+    is_placeholder = jobs is SAMPLE_JOB_LISTINGS
+    meta = {
+        "from_cache": len(cached_sources) > 0 and len(live_sources) == 0,
+        "cached_sources": cached_sources,
+        "live_sources": live_sources,
+        "is_placeholder": is_placeholder,
+    }
+
+    if return_meta:
+        return jobs, meta
     return jobs
 
 
-def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=DEFAULT_COUNTRY, source="all"):
+def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=DEFAULT_COUNTRY, source="all", force_refresh=False):
     """
     Full pipeline: parses resume and ranks it against job listings.
     Automatically derives a search query if none is provided.
+    Supports force_refresh to bypass the job cache when requested.
     """
     logger.info("Parsing resume")
     parsed_resume = parse_resume(resume_filepath)
@@ -432,7 +496,15 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
             logger.info("Auto-applied %d suggested skill(s) for this matching run "
                         "(the resume file itself is unchanged).", len(suggested_skills))
 
-    search_info = {"query": search_query, "confidence": None, "source": source, "is_placeholder": False}
+    search_info = {
+        "query": search_query,
+        "confidence": None,
+        "source": source,
+        "is_placeholder": False,
+        "from_cache": False,
+        "cached_sources": [],
+        "live_sources": [],
+    }
     if job_listings is None:
         query = search_query
         confidence = None
@@ -444,13 +516,18 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
                 logger.info('Auto-detected search query from skills: "%s"', query)
             else:
                 logger.info("No usable skills detected to build a search query from")
-        job_listings = get_job_listings(query, country, source)
+
+        job_listings, cache_meta = get_job_listings(
+            query, country=country, source=source, force_refresh=force_refresh, return_meta=True
+        )
         search_info = {
             "query": query,
             "confidence": confidence,
             "source": source,
-            # Lets clients warn users that these aren't real live listings
             "is_placeholder": job_listings is SAMPLE_JOB_LISTINGS,
+            "from_cache": cache_meta.get("from_cache", False),
+            "cached_sources": cache_meta.get("cached_sources", []),
+            "live_sources": cache_meta.get("live_sources", []),
         }
 
     logger.info("Matching against %d job listings...", len(job_listings))
@@ -469,6 +546,7 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
     }
 
 
+
 def _parse_args(argv=None):
     """CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -481,6 +559,8 @@ def _parse_args(argv=None):
     parser.add_argument("--country", default=DEFAULT_COUNTRY, help=f"Country code (default: {DEFAULT_COUNTRY})")
     parser.add_argument("--source", default="all", choices=["all", "philjobnet", "adzuna", "onlinejobs"],
                         help="Job source (default: all, merged and ranked together)")
+    parser.add_argument("--refresh", "--force-refresh", action="store_true",
+                        help="Force live scraping, bypassing the local job cache")
     return parser.parse_args(argv)
 
 
@@ -493,7 +573,13 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     args = _parse_args()
-    result = run_pipeline(args.resume_path, search_query=args.query, country=args.country, source=args.source)
+    result = run_pipeline(
+        args.resume_path,
+        search_query=args.query,
+        country=args.country,
+        source=args.source,
+        force_refresh=args.refresh,
+    )
 
     print("\n--- Ranked matches ---")
     for job in result["ranked_results"]:

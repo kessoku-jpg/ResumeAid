@@ -210,7 +210,24 @@ body.dark{
 }
 .view-title{font-family:var(--f-cond);font-size:38px;font-weight:600;line-height:1.05;color:var(--txt-1);letter-spacing:-.01em}
 .view-subtitle{font-size:15px;color:var(--txt-2);margin-top:6px}
-.view-header-actions{flex-shrink:0}
+.view-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.cache-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:600;padding:4px 10px;
+  border-radius:12px;background:var(--accent-tint);color:var(--accent-text);
+  border:1px solid rgba(29,87,65,.15);
+  letter-spacing:.01em;
+}
+.btn-refresh{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:13px;font-weight:500;padding:6px 12px;
+  border-radius:var(--r);background:var(--surface);
+  color:var(--txt-2);border:1px solid var(--rule);
+  cursor:pointer;transition:all .15s ease;
+}
+.btn-refresh:hover{background:var(--surface-2);color:var(--txt-1);border-color:var(--rule-strong)}
+.btn-refresh svg{transition:transform .35s ease}
+.btn-refresh:hover svg{transform:rotate(120deg)}
 
 /* ════════════════════════════════════════════════════════
    UPLOAD VIEW

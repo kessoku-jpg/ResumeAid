@@ -84,6 +84,7 @@ def analyze():
     query = (request.form.get("query") or "").strip() or None
     country = (request.form.get("country") or "ph").strip().lower()[:2]
     source = (request.form.get("source") or "all").strip().lower()
+    force_refresh = request.form.get("refresh", "").lower() in ("1", "true", "yes")
     if source not in ALLOWED_SOURCES:
         return jsonify({"error": f"Unknown source '{source}'."}), 400
 
@@ -100,6 +101,7 @@ def analyze():
             search_query=query,
             country=country,
             source=source,
+            force_refresh=force_refresh,
         )
 
         parsed_resume = result["parsed_resume"]

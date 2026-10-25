@@ -283,6 +283,13 @@
             <p class="view-subtitle" id="matches-subtitle">Upload your resume to see live job matches.</p>
           </div>
           <div class="view-header-actions hidden" id="matches-sort-wrap">
+            <span class="cache-badge hidden" id="cache-badge" title="Listings retrieved instantly from local cache">⚡ Cached</span>
+            <button class="btn-refresh hidden" id="btn-refresh-listings" title="Re-fetch fresh listings from job boards">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              <span>Refresh</span>
+            </button>
             <select class="sort-select" id="matches-sort" aria-label="Sort matches">
               <option value="score">Highest match</option>
               <option value="title">A–Z by title</option>
