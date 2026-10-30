@@ -1,15 +1,19 @@
-# Uploaded resumes and personal documents
+# Cache and databases
+.cache/
+**/.cache/
+*.sqlite3
+*.db
+
+# Uploaded resumes
 Resumes/
 uploads/
 *.pdf
 *.docx
 *.doc
 
-# Environment and credentials
+# Environment
 .env*
 !.env.example
-secrets/
-credentials.json
 
 # Python
 __pycache__/
