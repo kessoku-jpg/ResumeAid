@@ -1,21 +1,18 @@
-__pycache__/
-*.pyc
-.env
-!.env.example
+# Uploaded resumes and personal documents
+Resumes/
+uploads/
+*.pdf
+*.docx
+*.doc
 
-# Virtual environments
+# Environment and credentials
+.env*
+!.env.example
+secrets/
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
 venv/
 .venv/
-env/
-
-# Editors / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Logs / temp
-*.log
-.cache/
-*.sqlite3
-*.db
