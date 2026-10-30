@@ -78,12 +78,18 @@ def normalize_query(query):
     return re.sub(r"\s+", " ", q).strip()
 
 
+# Bump when scrapers start returning new fields, so entries cached in the
+# old shape are ignored rather than served without those fields.
+# v2: salary / employment type / posting date raw fields for filtering.
+CACHE_SCHEMA_VERSION = "v2"
+
+
 def make_cache_key(source, query, country=None):
     """Generates a canonical cache key."""
     norm_src = (source or "").strip().lower()
     norm_q = normalize_query(query)
     norm_country = (country or "").strip().lower()
-    return f"{norm_src}:{norm_q}:{norm_country}"
+    return f"{CACHE_SCHEMA_VERSION}:{norm_src}:{norm_q}:{norm_country}"
 
 
 def get_cached_jobs(source, query, country=None, max_age_hours=None, allow_stale=False, db_path=None):

@@ -88,6 +88,44 @@ def _extract_section_text(soup, heading_text, max_chars=2000):
     return " ".join(collected)[:max_chars].strip()
 
 
+def _extract_field_value(soup, label, max_chars=100):
+    """
+    Returns the single value shown right after a short header label
+    (e.g. "Wage / Salary" -> "$650/month").
+
+    Only leaf elements are considered: wrapper elements also contain the
+    next label's text, which _extract_section_text would otherwise pick up
+    ("Any WAGE / SALARY 5 ...").
+    """
+    label_lower = label.strip().rstrip(":").lower()
+    all_labels = {lbl.rstrip(":") for lbl in KNOWN_SECTION_LABELS}
+
+    heading_tag = None
+    for tag in soup.find_all(True):
+        if tag.get_text(strip=True).rstrip(":").lower() == label_lower:
+            heading_tag = tag
+            break
+    if heading_tag is None:
+        return ""
+
+    for el in heading_tag.find_all_next():
+        if el.find(True) is not None:
+            continue  # wrapper element — its text mixes several fields
+        text = el.get_text(" ", strip=True)
+        normalized = text.rstrip(":").lower()
+        if not text or normalized == label_lower:
+            continue
+        if normalized in all_labels:
+            return ""  # reached the next label without finding a value
+        return text[:max_chars]
+    return ""
+
+
+def _parse_hours(text):
+    match = re.search(r"\d+(?:\.\d+)?", text or "")
+    return float(match.group()) if match else None
+
+
 def _parse_job_detail(url):
     """Parses a single job detail page into the standard job schema."""
     soup = _get_soup(url)
@@ -100,8 +138,10 @@ def _parse_job_detail(url):
         title = slug_match.group(1).replace("-", " ").title() if slug_match else "Untitled listing"
 
     job_overview = _extract_section_text(soup, "Job Overview")
-    work_type = _extract_section_text(soup, "Type Of Work", max_chars=100)
-    salary = _extract_section_text(soup, "Wage / Salary", max_chars=100)
+    work_type = _extract_field_value(soup, "Type Of Work")
+    salary = _extract_field_value(soup, "Wage / Salary")
+    hours = _extract_field_value(soup, "Hours Per Week")
+    date_updated = _extract_field_value(soup, "Date Updated")
     skills = _extract_section_text(soup, "Skill Requirement", max_chars=300)
 
     description_parts = [p for p in [work_type and f"Type: {work_type}", salary and f"Pay: {salary}", job_overview, skills and f"Skills: {skills}"] if p]
@@ -122,6 +162,12 @@ def _parse_job_detail(url):
         "description": description,
         "url": url,
         "location": location,
+        # Raw fields normalized later by job_attributes.enrich_job()
+        "salary_text": salary,
+        "employment_type_raw": work_type,   # "Full Time" / "Part Time" / "Gig" / "Any"
+        "work_mode_raw": "remote",
+        "hours_per_week": _parse_hours(hours),
+        "posted_raw": date_updated,         # e.g. "Oct 29, 2026"
     }
 
 

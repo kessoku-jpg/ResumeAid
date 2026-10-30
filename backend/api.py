@@ -124,6 +124,12 @@ def analyze():
                 "relative_score": job.get("relative_score"),
                 "comment": job.get("comment"),
                 "breakdown": job.get("breakdown"),
+                # Normalized by job_attributes.enrich_job() for filtering/sorting
+                "source": job.get("source"),
+                "salary": job.get("salary"),
+                "work_mode": job.get("work_mode"),
+                "employment_type": job.get("employment_type"),
+                "posted_at": job.get("posted_at"),
             }
             for job in result["ranked_results"]
         ]

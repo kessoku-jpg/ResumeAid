@@ -89,6 +89,51 @@ def _extract_section_text(soup, heading_text, max_chars=2000):
     return " ".join(collected)[:max_chars].strip()
 
 
+# Employment types PhilJobNet prints in the job header.
+_EMPLOYMENT_TYPE_RE = re.compile(
+    r"^(permanent|contractual|project[\s-]?based|seasonal|temporary|probationary|"
+    r"part[\s-]?time|full[\s-]?time|casual|internship|work from home)$",
+    re.IGNORECASE,
+)
+
+
+def _extract_header_fields(soup, title):
+    """
+    Reads the fixed header block above "Job Description". On real pages it is:
+      TITLE, salary ("₱18,000.00" / "Salary not specified"), COMPANY,
+      "Apply now", LOCATION, EDUCATION, EMPLOYMENT TYPE ("Permanent"),
+      "Job Description", "Posted on", "29 October 2026"
+    Every field is matched by its shape rather than position, so a
+    missing line doesn't shift the others.
+    """
+    lines = [ln.strip() for ln in soup.get_text("\n", strip=True).split("\n") if ln.strip()]
+    fields = {"salary_text": "", "employment_type_raw": "", "posted_raw": ""}
+
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.lower() == title.lower())
+    except StopIteration:
+        return fields
+
+    header = []
+    for ln in lines[start + 1:start + 15]:
+        if ln.lower() == "job description":
+            break
+        header.append(ln)
+
+    for ln in header:
+        if not fields["salary_text"] and ("₱" in ln or "salary" in ln.lower()):
+            fields["salary_text"] = "" if "not specified" in ln.lower() else ln
+        elif not fields["employment_type_raw"] and _EMPLOYMENT_TYPE_RE.match(ln):
+            fields["employment_type_raw"] = ln
+
+    for i, ln in enumerate(lines[start:start + 40], start=start):
+        if ln.lower() == "posted on" and i + 1 < len(lines):
+            fields["posted_raw"] = lines[i + 1]
+            break
+
+    return fields
+
+
 def _parse_job_detail(url):
     """Parses a single job detail page into the standard job schema."""
     soup = _get_soup(url)
@@ -126,6 +171,8 @@ def _parse_job_detail(url):
         "description": description,
         "url": url,
         "location": location,
+        # Raw fields normalized later by job_attributes.enrich_job()
+        **_extract_header_fields(soup, title),
     }
 
 

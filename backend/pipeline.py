@@ -48,6 +48,8 @@ try:
 except ImportError:
     CACHE_AVAILABLE = False
 
+from job_attributes import enrich_job
+
 
 # Fallback placeholder listings if APIs fail or return nothing.
 # Spans broad industries so any resume gets a meaningful spread of scores.
@@ -443,7 +445,8 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
 
     all_jobs = []
     for src in requested_sources:
-        all_jobs.extend(cached_jobs_map.get(src, []))
+        # Tag each listing with the board it came from (used by the source filter)
+        all_jobs.extend({**job, "source": src} for job in cached_jobs_map.get(src, []))
 
     jobs = dedupe_jobs(all_jobs)
     if jobs:
@@ -529,6 +532,11 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
             "cached_sources": cache_meta.get("cached_sources", []),
             "live_sources": cache_meta.get("live_sources", []),
         }
+
+    # Normalize salary / work setup / job type / posting date for filtering.
+    # Done after the cache so older cached entries get the same fields.
+    default_source = "sample" if search_info["is_placeholder"] else None
+    job_listings = [enrich_job(job, default_source=default_source) for job in job_listings]
 
     logger.info("Matching against %d job listings...", len(job_listings))
     ranked_results = rank_jobs_for_resume(parsed_resume, job_listings)

@@ -290,15 +290,116 @@
               </svg>
               <span>Refresh</span>
             </button>
-            <select class="sort-select" id="matches-sort" aria-label="Sort matches">
-              <option value="score">Highest match</option>
-              <option value="title">A–Z by title</option>
-            </select>
           </div>
         </div>
 
         <!-- Shown when backend fell back to sample listings -->
         <div class="matches-notice hidden" id="matches-notice" role="status"></div>
+
+        <!-- Filter + sort bar (filters run client-side on the current results) -->
+        <section class="match-filters hidden" id="match-filters" aria-label="Filter and sort matches">
+          <div class="mf-toolbar">
+            <label class="mf-search" for="mf-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
+              <span class="visually-hidden">Search matches</span>
+              <input type="search" id="mf-search" placeholder="Search title, company or location" autocomplete="off" />
+            </label>
+            <div class="mf-sort">
+              <label class="mf-sort-label" for="matches-sort">Sort by</label>
+              <select class="sort-select" id="matches-sort">
+                <option value="score">Best match</option>
+                <option value="salary_desc">Salary: high to low</option>
+                <option value="salary_asc">Salary: low to high</option>
+                <option value="newest">Newest first</option>
+                <option value="title">Title A–Z</option>
+                <option value="company">Company A–Z</option>
+              </select>
+            </div>
+            <button class="mf-toggle" id="mf-toggle" type="button" aria-expanded="true" aria-controls="mf-panel">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 6h16M7 12h10M10 18h4" />
+              </svg>
+              Filters
+              <span class="mf-count hidden" id="mf-count">0</span>
+            </button>
+          </div>
+
+          <div class="mf-panel" id="mf-panel">
+            <div class="mf-group">
+              <span class="mf-label" id="mf-mode-label">Work setup</span>
+              <div class="seg" id="mf-mode" role="radiogroup" aria-labelledby="mf-mode-label">
+                <button type="button" class="seg-btn" role="radio" data-value="any" aria-checked="true">Any</button>
+                <button type="button" class="seg-btn" role="radio" data-value="remote" aria-checked="false">Remote</button>
+                <button type="button" class="seg-btn" role="radio" data-value="hybrid" aria-checked="false">Hybrid</button>
+                <button type="button" class="seg-btn" role="radio" data-value="onsite" aria-checked="false">On-site</button>
+              </div>
+            </div>
+
+            <div class="mf-group">
+              <span class="mf-label" id="mf-type-label">Job type</span>
+              <div class="mf-chips" id="mf-type" role="group" aria-labelledby="mf-type-label"></div>
+            </div>
+
+            <div class="mf-group">
+              <label class="mf-label" for="mf-salary-min">Monthly salary</label>
+              <select class="sort-select mf-select" id="mf-salary-min">
+                <option value="0">Any salary</option>
+                <option value="15000">₱15,000+</option>
+                <option value="20000">₱20,000+</option>
+                <option value="30000">₱30,000+</option>
+                <option value="50000">₱50,000+</option>
+                <option value="80000">₱80,000+</option>
+                <option value="100000">₱100,000+</option>
+              </select>
+              <label class="mf-check" for="mf-salary-only">
+                <input type="checkbox" id="mf-salary-only" />
+                Only show roles with salary listed
+              </label>
+            </div>
+
+            <div class="mf-group">
+              <label class="mf-label" for="mf-score">Minimum match</label>
+              <div class="mf-range-row">
+                <input type="range" class="mf-range" id="mf-score" min="0" max="90" step="5" value="0" />
+                <output class="mf-range-val" id="mf-score-val" for="mf-score">0%</output>
+              </div>
+            </div>
+
+            <div class="mf-group">
+              <label class="mf-label" for="mf-posted">Date posted</label>
+              <select class="sort-select mf-select" id="mf-posted">
+                <option value="0">Any time</option>
+                <option value="1">Last 24 hours</option>
+                <option value="3">Last 3 days</option>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+              </select>
+            </div>
+
+            <div class="mf-group">
+              <span class="mf-label" id="mf-source-label">Job board</span>
+              <div class="mf-chips" id="mf-source" role="group" aria-labelledby="mf-source-label"></div>
+            </div>
+          </div>
+
+          <div class="mf-summary">
+            <span id="mf-result-count" role="status" aria-live="polite"></span>
+            <span class="mf-hint">Salaries in other currencies are converted to approximate pesos for filtering.</span>
+            <button class="mf-reset" id="mf-reset" type="button" disabled>Clear filters</button>
+          </div>
+        </section>
+
+        <!-- Shown when filters exclude every match -->
+        <div class="filter-empty hidden" id="matches-filter-empty">
+          <h2>No roles fit these filters</h2>
+          <p>Try widening the salary range, lowering the minimum match, or choosing a different work setup.</p>
+          <button class="btn-outline" id="mf-reset-empty" type="button">Clear filters</button>
+        </div>
 
         <!-- Empty state -->
         <div class="empty-state" id="matches-empty">
@@ -640,6 +741,10 @@
             <p class="match-score-company" id="modal-company"></p>
             <p class="match-score-location" id="modal-location"></p>
           </div>
+        </div>
+        <div class="modal-section hidden" id="modal-facts-wrap">
+          <h4 class="modal-section-label">Job details</h4>
+          <dl class="job-facts" id="modal-facts"></dl>
         </div>
         <div class="modal-section">
           <h4 class="modal-section-label">Summary</h4>

@@ -5,6 +5,8 @@ import sys
 
 import requests
 
+from job_attributes import ADZUNA_CURRENCY
+
 # Adzuna endpoint: /v1/api/jobs/{country}/search/{page}
 ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
 
@@ -108,6 +110,16 @@ def search_jobs(query, country="gb", results_per_page=10, page=1):
             "description": description,
             "url": url_apply,
             "location": location_str,
+            # Raw fields normalized later by job_attributes.enrich_job().
+            # Adzuna salaries are annual, in the searched market's currency;
+            # salary_is_predicted == "1" means Adzuna estimated it.
+            "salary_min": result.get("salary_min"),
+            "salary_max": result.get("salary_max"),
+            "salary_is_predicted": str(result.get("salary_is_predicted", "0")) == "1",
+            "salary_currency": ADZUNA_CURRENCY.get(resolved_country),
+            "contract_time": result.get("contract_time") or "",   # full_time / part_time
+            "contract_type": result.get("contract_type") or "",   # permanent / contract
+            "posted_raw": result.get("created") or "",            # ISO 8601
         })
 
     return jobs

@@ -18,6 +18,21 @@ function loadCountry() {
   return COUNTRIES[saved] ? saved : 'ph';
 }
 
+// Default match filters — "Best match" ordering with nothing filtered out
+function defaultFilters() {
+  return {
+    q: '',
+    sort: 'score',
+    mode: 'any',          // any | remote | hybrid | onsite
+    types: new Set(),     // employment_type values
+    sources: new Set(),   // source values
+    salaryMin: 0,         // approximate monthly PHP
+    salaryOnly: false,
+    minScore: 0,
+    postedDays: 0,
+  };
+}
+
 // Global application state
 const state = {
   lastResponse: null,
@@ -25,6 +40,9 @@ const state = {
   country: loadCountry(),
   darkMode: localStorage.getItem('ra_dark') === 'true',
   analysisController: null,
+  filters: defaultFilters(),
+  // Filter panel starts open on desktop, collapsed on phones
+  filtersOpen: window.matchMedia('(min-width: 769px)').matches,
 };
 
 // DOM element selectors
@@ -111,8 +129,8 @@ function bindAll() {
   $('modal-match-close').addEventListener('click', () => closeModal('modal-match'));
   $('modal-match').addEventListener('click', e => { if (e.target === $('modal-match')) closeModal('modal-match'); });
 
-  // Re-render matches on sort change
-  $('matches-sort').addEventListener('change', renderMatches);
+  // Match filters and sorting
+  bindFilters();
 
   // Settings panel toggles
   $('dark-mode-toggle').addEventListener('change', () => {
@@ -231,6 +249,9 @@ function runAnalysis(forceRefresh = false) {
     })
     .then(data => {
       state.lastResponse = data;
+      // New results → start from "Best match" with no filters applied
+      state.filters = defaultFilters();
+      syncFilterControls();
       updateMatchBadge(data.matches?.length ?? 0);
       if (data.search_info?.is_placeholder) {
         toast('No live listings found right now — showing sample roles instead.', true);
@@ -338,17 +359,21 @@ function showResumeCheck(data) {
   openOverlay('overlay-resume-check');
 }
 
-// Render and sort job match cards
+// Render, filter and sort job match cards
 function renderMatches() {
   const data = state.lastResponse;
   const grid = $('matches-grid');
   const empty = $('matches-empty');
   const sub = $('matches-subtitle');
   const sw = $('matches-sort-wrap');
+  const filtersEl = $('match-filters');
+  const filterEmpty = $('matches-filter-empty');
 
   if (!data?.matches?.length) {
     grid.classList.add('hidden');
     empty.classList.remove('hidden');
+    filtersEl.classList.add('hidden');
+    filterEmpty.classList.add('hidden');
     $('matches-notice').classList.add('hidden');
     sub.textContent = data
       ? 'No matching roles found. Try a different country in Settings.'
@@ -358,22 +383,26 @@ function renderMatches() {
   }
 
   empty.classList.add('hidden');
-  grid.classList.remove('hidden');
   sw.classList.remove('hidden');
+  filtersEl.classList.remove('hidden');
 
-  const matches = [...data.matches];
-  const sort = $('matches-sort').value;
-  if (sort === 'title') {
-    matches.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-  } else {
-    matches.sort((a, b) => scoreNum(b) - scoreNum(a));
-  }
+  const all = data.matches;
+  renderFilterOptions(all);
+  const visible = sortMatches(all.filter(passesFilters), state.filters.sort);
 
   const info = data.search_info || {};
   const placeholder = !!info.is_placeholder;
   const noun = placeholder ? 'sample role' : 'live role';
   const query = info.query ? ` for “${info.query}”` : '';
-  sub.textContent = `${matches.length} ${noun}${matches.length === 1 ? '' : 's'} matched${query}`;
+  sub.textContent = `${all.length} ${noun}${all.length === 1 ? '' : 's'} matched${query}`;
+
+  const active = activeFilterCount();
+  $('mf-result-count').textContent = active || state.filters.q
+    ? `Showing ${visible.length} of ${all.length}`
+    : `Showing all ${all.length}`;
+  $('mf-count').textContent = active;
+  $('mf-count').classList.toggle('hidden', active === 0);
+  $('mf-reset').disabled = active === 0 && !state.filters.q;
 
   const isCached = !!info.from_cache;
   const cacheBadge = $('cache-badge');
@@ -387,11 +416,212 @@ function renderMatches() {
     notice.textContent = 'We couldn’t fetch live listings right now, so these are example roles to show how matching works. Try again later.';
   }
 
+  grid.classList.toggle('hidden', visible.length === 0);
+  filterEmpty.classList.toggle('hidden', visible.length > 0);
   grid.innerHTML = '';
-  matches.forEach((m, i) => {
-    const card = buildMatchCard(m, i);
-    grid.appendChild(card);
+  visible.forEach((m, i) => grid.appendChild(buildMatchCard(m, i)));
+}
+
+// ── Match filters ────────────────────────────────────────────
+const MODE_LABELS = { remote: 'Remote', hybrid: 'Hybrid', onsite: 'On-site' };
+const TYPE_LABELS = {
+  full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract',
+  freelance: 'Freelance', internship: 'Internship',
+};
+const SOURCE_LABELS = {
+  philjobnet: 'PhilJobNet', onlinejobs: 'OnlineJobs.ph', adzuna: 'Adzuna', sample: 'Sample',
+};
+
+function bindFilters() {
+  const f = () => state.filters;
+
+  $('mf-search').addEventListener('input', e => { f().q = e.target.value.trim().toLowerCase(); renderMatches(); });
+  $('matches-sort').addEventListener('change', e => { f().sort = e.target.value; renderMatches(); });
+
+  $$('#mf-mode .seg-btn').forEach(btn => btn.addEventListener('click', () => {
+    f().mode = btn.dataset.value;
+    syncFilterControls();
+    renderMatches();
+  }));
+
+  // Chip groups are re-rendered with the results, so delegate clicks
+  const chipToggle = (containerId, key) => $(containerId).addEventListener('click', e => {
+    const chip = e.target.closest('.mf-chip');
+    if (!chip || chip.disabled) return;
+    const set = f()[key];
+    set.has(chip.dataset.value) ? set.delete(chip.dataset.value) : set.add(chip.dataset.value);
+    renderMatches();
   });
+  chipToggle('mf-type', 'types');
+  chipToggle('mf-source', 'sources');
+
+  $('mf-salary-min').addEventListener('change', e => { f().salaryMin = Number(e.target.value) || 0; renderMatches(); });
+  $('mf-salary-only').addEventListener('change', e => { f().salaryOnly = e.target.checked; renderMatches(); });
+  $('mf-score').addEventListener('input', e => {
+    f().minScore = Number(e.target.value) || 0;
+    $('mf-score-val').textContent = `${f().minScore}%`;
+    renderMatches();
+  });
+  $('mf-posted').addEventListener('change', e => { f().postedDays = Number(e.target.value) || 0; renderMatches(); });
+
+  $('mf-toggle').addEventListener('click', () => {
+    state.filtersOpen = !state.filtersOpen;
+    syncFilterControls();
+  });
+
+  const reset = () => {
+    const sort = state.filters.sort; // clearing filters keeps the chosen order
+    state.filters = defaultFilters();
+    state.filters.sort = sort;
+    syncFilterControls();
+    renderMatches();
+  };
+  $('mf-reset').addEventListener('click', reset);
+  $('mf-reset-empty').addEventListener('click', reset);
+
+  syncFilterControls();
+}
+
+// Push state.filters into the form controls
+function syncFilterControls() {
+  const f = state.filters;
+  $('mf-search').value = f.q;
+  $('matches-sort').value = f.sort;
+  $$('#mf-mode .seg-btn').forEach(b => b.setAttribute('aria-checked', String(b.dataset.value === f.mode)));
+  $('mf-salary-min').value = String(f.salaryMin);
+  $('mf-salary-only').checked = f.salaryOnly;
+  $('mf-score').value = String(f.minScore);
+  $('mf-score-val').textContent = `${f.minScore}%`;
+  $('mf-posted').value = String(f.postedDays);
+  $('mf-panel').classList.toggle('hidden', !state.filtersOpen);
+  $('mf-toggle').setAttribute('aria-expanded', String(state.filtersOpen));
+}
+
+// Only offer job-type / board options that exist in these results, with counts
+function renderFilterOptions(matches) {
+  const count = key => matches.reduce((acc, m) => {
+    if (m[key]) acc[m[key]] = (acc[m[key]] || 0) + 1;
+    return acc;
+  }, {});
+
+  const renderChips = (containerId, labels, counts, selected, noneText) => {
+    const el = $(containerId);
+    const keys = Object.keys(labels).filter(k => counts[k]);
+    // Keep selected chips visible even if they'd otherwise disappear
+    selected.forEach(k => { if (!keys.includes(k)) keys.push(k); });
+    if (!keys.length) { el.innerHTML = `<span class="mf-none">${esc(noneText)}</span>`; return; }
+    el.innerHTML = keys.map(k => `
+      <button type="button" class="mf-chip" data-value="${esc(k)}" aria-pressed="${selected.has(k)}">
+        ${esc(labels[k] || k)}<span class="mf-chip-n">${counts[k] || 0}</span>
+      </button>`).join('');
+  };
+
+  renderChips('mf-type', TYPE_LABELS, count('employment_type'), state.filters.types, 'Not listed for these roles');
+  renderChips('mf-source', SOURCE_LABELS, count('source'), state.filters.sources, 'Unknown');
+
+  // Show how many roles fall under each work setup
+  const modes = count('work_mode');
+  $$('#mf-mode .seg-btn').forEach(b => {
+    const v = b.dataset.value;
+    const n = v === 'any' ? matches.length : (modes[v] || 0);
+    b.textContent = v === 'any' ? 'Any' : MODE_LABELS[v];
+    b.title = `${n} role${n === 1 ? '' : 's'}`;
+    b.classList.toggle('is-empty', v !== 'any' && n === 0);
+  });
+}
+
+function activeFilterCount() {
+  const f = state.filters;
+  return (f.mode !== 'any') + f.types.size + f.sources.size + (f.salaryMin > 0)
+    + f.salaryOnly + (f.minScore > 0) + (f.postedDays > 0);
+}
+
+function passesFilters(m) {
+  const f = state.filters;
+  if (f.q) {
+    const hay = `${m.title || ''} ${m.company || ''} ${m.location || ''}`.toLowerCase();
+    if (!hay.includes(f.q)) return false;
+  }
+  if (f.mode !== 'any' && m.work_mode !== f.mode) return false;
+  if (f.types.size && !f.types.has(m.employment_type)) return false;
+  if (f.sources.size && !f.sources.has(m.source)) return false;
+  if ((f.salaryOnly || f.salaryMin > 0) && !m.salary) return false;
+  if (f.salaryMin > 0 && salaryHigh(m) < f.salaryMin) return false;
+  if (f.minScore > 0 && scoreNum(m) < f.minScore) return false;
+  if (f.postedDays > 0) {
+    const age = daysSince(m.posted_at);
+    if (age === null || age > f.postedDays) return false;
+  }
+  return true;
+}
+
+// Approximate monthly PHP figures (computed by the backend) for comparison
+function salaryHigh(m) { return m.salary?.monthly_php_max ?? m.salary?.monthly_php_min ?? -1; }
+function salaryLow(m) { return m.salary?.monthly_php_min ?? m.salary?.monthly_php_max ?? Infinity; }
+
+function sortMatches(list, sort) {
+  const byScore = (a, b) => scoreNum(b) - scoreNum(a);
+  // Items missing the sort field always go last, then fall back to match score
+  const missingLast = (hasA, hasB) => (hasA === hasB ? 0 : hasA ? -1 : 1);
+  const text = v => (v && v !== 'Unknown' ? v : '');
+  const cmp = {
+    score: byScore,
+    salary_desc: (a, b) => missingLast(!!a.salary, !!b.salary) || salaryHigh(b) - salaryHigh(a) || byScore(a, b),
+    salary_asc: (a, b) => missingLast(!!a.salary, !!b.salary) || salaryLow(a) - salaryLow(b) || byScore(a, b),
+    newest: (a, b) => missingLast(!!a.posted_at, !!b.posted_at)
+      || (b.posted_at || '').localeCompare(a.posted_at || '') || byScore(a, b),
+    title: (a, b) => (a.title || '').localeCompare(b.title || ''),
+    company: (a, b) => missingLast(!!text(a.company), !!text(b.company))
+      || text(a.company).localeCompare(text(b.company)) || byScore(a, b),
+  }[sort] || byScore;
+  return [...list].sort(cmp);
+}
+
+// Days between a YYYY-MM-DD date and today (local time), or null
+function daysSince(isoDate) {
+  if (!isoDate) return null;
+  const [y, mo, d] = isoDate.split('-').map(Number);
+  if (!y || !mo || !d) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((today - new Date(y, mo - 1, d)) / 86_400_000));
+}
+
+function postedLabel(isoDate) {
+  const n = daysSince(isoDate);
+  if (n === null) return '';
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Yesterday';
+  if (n < 30) return `${n} days ago`;
+  return new Date(isoDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+const CURRENCY_SYMBOLS = {
+  PHP: '₱', USD: '$', GBP: '£', EUR: '€', AUD: 'A$', CAD: 'C$', SGD: 'S$', NZD: 'NZ$', INR: '₹',
+};
+const PERIOD_LABELS = { hour: '/hr', day: '/day', week: '/wk', month: '/mo', year: '/yr' };
+
+function fmtAmount(n) {
+  if (n >= 100_000) return `${Math.round(n / 1000).toLocaleString()}k`;
+  return n.toLocaleString(undefined, { maximumFractionDigits: n < 100 ? 2 : 0 });
+}
+
+// "₱18,000/mo", "$5–7/hr", "Est. £40k–50k/yr"
+function formatSalary(s) {
+  if (!s) return '';
+  const sym = CURRENCY_SYMBOLS[s.currency] ?? `${s.currency} `;
+  const range = s.min === s.max ? fmtAmount(s.min) : `${fmtAmount(s.min)}–${fmtAmount(s.max)}`;
+  return `${s.is_estimate ? 'Est. ' : ''}${sym}${range}${PERIOD_LABELS[s.period] || ''}`;
+}
+
+// "≈ ₱25,000/mo" for anything not already a monthly peso figure
+function formatSalaryPhp(s) {
+  if (!s || (s.currency === 'PHP' && s.period === 'month')) return '';
+  const lo = s.monthly_php_min, hi = s.monthly_php_max;
+  if (lo == null && hi == null) return '';
+  const range = lo === hi || hi == null || lo == null
+    ? `₱${(lo ?? hi).toLocaleString()}`
+    : `₱${lo.toLocaleString()}–${hi.toLocaleString()}`;
+  return `≈ ${range}/mo`;
 }
 
 // Backend always returns match_score as a 0–100 percentage
@@ -415,6 +645,18 @@ function buildMatchCard(match, idx) {
   const location = esc(match.location || '');
   const subline = [company, location].filter(Boolean).join(' · ');
 
+  // Only show attributes we actually know — never "Unknown" tags
+  const tags = [];
+  if (match.salary) {
+    const php = formatSalaryPhp(match.salary);
+    tags.push(`<span class="mc-tag is-salary"${php ? ` title="${esc(php)}"` : ''}>${esc(formatSalary(match.salary))}</span>`);
+  }
+  if (match.work_mode) tags.push(`<span class="mc-tag${match.work_mode === 'remote' ? ' is-remote' : ''}">${esc(MODE_LABELS[match.work_mode] || match.work_mode)}</span>`);
+  if (match.employment_type) tags.push(`<span class="mc-tag">${esc(TYPE_LABELS[match.employment_type] || match.employment_type)}</span>`);
+  const posted = postedLabel(match.posted_at);
+  if (posted) tags.push(`<span class="mc-tag is-quiet">${esc(posted)}</span>`);
+  const source = SOURCE_LABELS[match.source] || '';
+
   card.innerHTML = `
     <div class="mc-header">
       <p class="mc-title">${esc(match.title || 'Unknown role')}</p>
@@ -424,11 +666,13 @@ function buildMatchCard(match, idx) {
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       ${subline}
     </p>` : ''}
+    ${tags.length ? `<div class="mc-tags">${tags.join('')}</div>` : ''}
     <div class="mc-footer">
       <span class="mc-link">
         View details
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
       </span>
+      ${source ? `<span class="mc-source">via ${esc(source)}</span>` : ''}
       <svg class="mc-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </div>`;
 
@@ -447,6 +691,21 @@ function showMatchDetail(match) {
   $('modal-company').textContent = match.company || '';
   $('modal-location').textContent = match.location || '';
   $('modal-comment').textContent = match.comment || 'Match based on your resume and the role requirements.';
+
+  // Job details list — rows only for attributes the listing provides
+  const facts = [];
+  if (match.salary) {
+    const php = formatSalaryPhp(match.salary);
+    const note = match.salary.is_estimate ? 'Estimated by Adzuna' : '';
+    facts.push(['Salary', formatSalary(match.salary), [php, note].filter(Boolean).join(' · ')]);
+  }
+  if (match.work_mode) facts.push(['Work setup', MODE_LABELS[match.work_mode] || match.work_mode]);
+  if (match.employment_type) facts.push(['Job type', TYPE_LABELS[match.employment_type] || match.employment_type]);
+  if (match.posted_at) facts.push(['Posted', postedLabel(match.posted_at)]);
+  if (SOURCE_LABELS[match.source]) facts.push(['Job board', SOURCE_LABELS[match.source]]);
+  $('modal-facts').innerHTML = facts.map(([k, v, sub]) =>
+    `<dt>${esc(k)}</dt><dd>${esc(v)}${sub ? `<span class="fact-sub">${esc(sub)}</span>` : ''}</dd>`).join('');
+  $('modal-facts-wrap').classList.toggle('hidden', facts.length === 0);
 
   const listBtn = $('btn-view-listing');
   if (match.url && /^https?:\/\//i.test(match.url)) {
