@@ -292,7 +292,168 @@ def _is_noise_segment(segment):
     return False
 
 
-def build_resume_segments(parsed_resume):
+# =======================================================================
+# EDUCATION QUALIFICATION CHECK
+# Jobs that explicitly require a certain degree (e.g. College Graduate /
+# Bachelor's) only match if the resume meets that education level, and
+# only those jobs include the resume's Education section in scoring.
+# =======================================================================
+
+EDU_NONE = 0
+EDU_HIGH_SCHOOL = 1
+EDU_VOCATIONAL_OR_UNDERGRAD = 2
+EDU_BACHELOR = 3
+EDU_POSTGRAD = 4
+
+EDU_LABELS = {
+    EDU_NONE: None,
+    EDU_HIGH_SCHOOL: "High School Graduate",
+    EDU_VOCATIONAL_OR_UNDERGRAD: "Vocational / College Undergraduate",
+    EDU_BACHELOR: "Bachelor's / College Graduate",
+    EDU_POSTGRAD: "Master's / Postgraduate",
+}
+
+_RESUME_POSTGRAD_RE = re.compile(
+    r"\b(master\s+of|master'?s\b|m\.s\.|m\.a\.|\bmba\b|ph\.?d\.?\b|doctor\s+of|doctorate)\b",
+    re.IGNORECASE,
+)
+_RESUME_BACHELOR_RE = re.compile(
+    r"\b("
+    r"bachelor|baccalaureate|b\.s\.|b\.a\.|"
+    r"bs\s+(?:in\s+)?[a-z]|ba\s+(?:in\s+)?[a-z]|ab\s+(?:in\s+)?[a-z]|"
+    r"bscs|bsit|bsis|bsba|bsa|bsn|bsee|bsme|bsce|bsece|bsed|beed|bshm|bstm|"
+    r"college\s+graduate|university\s+graduate|degree\s+holder|"
+    r"cum\s+laude|magna\s+cum\s+laude|summa\s+cum\s+laude"
+    r")\b",
+    re.IGNORECASE,
+)
+_RESUME_UNDERGRAD_MARKER_RE = re.compile(
+    r"\b("
+    r"undergraduate|college\s+level|currently\s+enrolled|ongoing|in\s+progress|"
+    r"expected\s+graduation|expected\s+to\s+graduate|incomplete|"
+    r"1st\s+year|2nd\s+year|3rd\s+year|4th\s+year|"
+    r"first\s+year|second\s+year|third\s+year|fourth\s+year"
+    r")\b|"
+    r"\b20\d{2}\s*[-–—]\s*(?:present|current)\b",
+    re.IGNORECASE,
+)
+_RESUME_VOCATIONAL_RE = re.compile(
+    r"\b(associate|diploma|vocational|tesda|nc\s*[i1234v]+|national\s+certificate|college\s+level|undergraduate)\b",
+    re.IGNORECASE,
+)
+_RESUME_HIGH_SCHOOL_RE = re.compile(
+    r"\b(high\s+school|senior\s+high|junior\s+high|\bshs\b|\bjhs\b|secondary|k-?12|\bstem\b|\babm\b|\bhumss\b|\bgas\b|\btvl\b)\b",
+    re.IGNORECASE,
+)
+
+# Job description patterns for required education level
+_JOB_NO_DEGREE_RE = re.compile(
+    r"\b(no\s+degree\s+required|degree\s+not\s+required|without\s+a\s+degree|regardless\s+of\s+educational|any\s+educational\s+attainment)\b",
+    re.IGNORECASE,
+)
+_JOB_HIGH_SCHOOL_OK_RE = re.compile(
+    r"\b(high\s+school\s+(?:or\s+vocational\s+)?graduate|senior\s+high\s+school|\bshs\s+graduate|at\s+least\s+high\s+school|open\s+to\s+high\s+school|high\s+school\s+diploma)\b",
+    re.IGNORECASE,
+)
+_JOB_UNDERGRAD_OR_VOC_OK_RE = re.compile(
+    r"\b("
+    r"college\s+level|college\s+undergraduate|undergraduates?\s+(?:are\s+)?welcome|open\s+to\s+undergrad|"
+    r"at\s+least\s+(?:1st|2nd|3rd|first|second|third)\s+year|completed\s+at\s+least\s+\d+\s+years?\s+in\s+college|"
+    r"vocational\s+(?:or\s+high\s+school\s+)?graduate|associate'?s?\s+degree|tesda\s+[a-z0-9\s]*nc\s*[i1234v]+"
+    r")\b",
+    re.IGNORECASE,
+)
+_JOB_POSTGRAD_REQ_RE = re.compile(
+    r"\b(master'?s\s+degree|master\s+of\s+[a-z]+|\bmba\s+required|ph\.?d\.?\s+required|doctorate\s+degree|post[- ]?graduate\s+degree)\b",
+    re.IGNORECASE,
+)
+_JOB_BACHELOR_REQ_RE = re.compile(
+    r"\b("
+    r"bachelor'?s?(?:\s+degree|\s+of\b)|baccalaureate|b\.s\.\s+in|b\.a\.\s+in|"
+    r"bs\s+in\s+[a-z]+|ba\s+in\s+[a-z]+|bs/ba\b|"
+    r"college\s+graduate|university\s+graduate|degree\s+holder|college\s+degree|university\s+degree|"
+    r"4[- ]year\s+(?:college\s+)?(?:course|degree)|four[- ]year\s+(?:college\s+)?(?:course|degree)|"
+    r"graduate\s+of\s+(?:any\s+)?(?:a\s+)?(?:4[- ]year|four[- ]year|bachelor|college|bs\b|ba\b|ab\b)|"
+    r"(?:accountancy|accounting|finance|business|marketing|engineering|computer\s+science|information\s+technology|"
+    r"nursing|medical\s+technology|pharmacy|psychology|education|hospitality|tourism|architecture|hrm)\s+graduate|"
+    r"licensed\s+(?:civil|mechanical|electrical|electronics|chemical)\s+engineer|"
+    r"licensed\s+registered\s+nurse|registered\s+nurse\b|licensed\s+rmt\b|"
+    r"\bcpa\b|certified\s+public\s+accountant|\blet\s+passer\b|licensed\s+professional\s+teacher"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def detect_resume_education_level(parsed_resume):
+    """
+    Infers the candidate's highest completed education level from parsed_resume['education'].
+    Returns (level_int, label_str).
+    """
+    edu_text = (parsed_resume.get("education") or "").strip()
+    if not edu_text:
+        return EDU_NONE, EDU_LABELS[EDU_NONE]
+
+    if _RESUME_POSTGRAD_RE.search(edu_text):
+        return EDU_POSTGRAD, EDU_LABELS[EDU_POSTGRAD]
+
+    if _RESUME_BACHELOR_RE.search(edu_text):
+        # Check each line: if a bachelor's line is NOT marked as ongoing/undergrad,
+        # the candidate has completed a bachelor's degree.
+        lines = [ln.strip() for ln in edu_text.split("\n") if ln.strip()]
+        bachelor_lines = [ln for ln in lines if _RESUME_BACHELOR_RE.search(ln)] or [edu_text]
+        if any(not _RESUME_UNDERGRAD_MARKER_RE.search(ln) for ln in bachelor_lines):
+            return EDU_BACHELOR, EDU_LABELS[EDU_BACHELOR]
+        return EDU_VOCATIONAL_OR_UNDERGRAD, EDU_LABELS[EDU_VOCATIONAL_OR_UNDERGRAD]
+
+    if _RESUME_VOCATIONAL_RE.search(edu_text):
+        return EDU_VOCATIONAL_OR_UNDERGRAD, EDU_LABELS[EDU_VOCATIONAL_OR_UNDERGRAD]
+
+    if _RESUME_HIGH_SCHOOL_RE.search(edu_text):
+        return EDU_HIGH_SCHOOL, EDU_LABELS[EDU_HIGH_SCHOOL]
+
+    # Non-empty education section without specific keywords defaults to high school / undergrad
+    return EDU_VOCATIONAL_OR_UNDERGRAD, EDU_LABELS[EDU_VOCATIONAL_OR_UNDERGRAD]
+
+
+def detect_required_education(job_description, job_title=""):
+    """
+    Checks whether a job listing requires a specific education level.
+    Returns (level_int, label_str). Returns (0, None) if the listing does not
+    specify an education requirement.
+    """
+    text = f"{job_title or ''}\n{job_description or ''}"
+    if not text.strip() or _JOB_NO_DEGREE_RE.search(text):
+        return EDU_NONE, None
+
+    # Explicit openness to high school or vocational/undergrad sets the floor
+    if _JOB_HIGH_SCHOOL_OK_RE.search(text):
+        return EDU_HIGH_SCHOOL, EDU_LABELS[EDU_HIGH_SCHOOL]
+    if _JOB_UNDERGRAD_OR_VOC_OK_RE.search(text) and not _JOB_BACHELOR_REQ_RE.search(text):
+        return EDU_VOCATIONAL_OR_UNDERGRAD, EDU_LABELS[EDU_VOCATIONAL_OR_UNDERGRAD]
+
+    if _JOB_BACHELOR_REQ_RE.search(text):
+        return EDU_BACHELOR, EDU_LABELS[EDU_BACHELOR]
+
+    if _JOB_POSTGRAD_REQ_RE.search(text):
+        return EDU_POSTGRAD, EDU_LABELS[EDU_POSTGRAD]
+
+    return EDU_NONE, None
+
+
+def _extract_education_segments(parsed_resume):
+    """Returns cleaned lines from the resume's Education section."""
+    edu_text = (parsed_resume.get("education") or "").strip()
+    if not edu_text:
+        return []
+    segments = []
+    for line in edu_text.split("\n"):
+        line = line.strip(" -\t•")
+        if line and len(line) > 3 and not _is_noise_segment(line):
+            segments.append(line)
+    return segments
+
+
+def build_resume_segments(parsed_resume, include_education=False):
     """Extracts resume segments for matching from explicit skills and full sentences."""
     segments = []
 
@@ -307,6 +468,8 @@ def build_resume_segments(parsed_resume):
     text_blocks = []
     if parsed_resume.get("experience"):
         text_blocks.append(parsed_resume["experience"])
+    if include_education and parsed_resume.get("education"):
+        text_blocks.append(parsed_resume["education"])
     covered_keys = {"skills", "explicit_skills", "inline_skills", "education", "experience"}
     for section_name, content in parsed_resume.get("raw_sections", {}).items():
         if section_name in ("header",) or not content or section_name in covered_keys:
@@ -348,8 +511,26 @@ def precompute_resume_embeddings(parsed_resume):
     This turns matching from O(N) redundant encodes into an O(1) one-time encode,
     speeding up job ranking by up to 70-85%.
     """
-    resume_segments = build_resume_segments(parsed_resume)
+    import torch
+
+    resume_segments = build_resume_segments(parsed_resume, include_education=False)
     segment_embeddings = model.encode(resume_segments, convert_to_tensor=True) if resume_segments else None
+
+    # Pre-compute education segment embeddings so jobs that require a degree
+    # can include education in semantic scoring without re-encoding the rest.
+    edu_segments = _extract_education_segments(parsed_resume)
+    if edu_segments:
+        edu_seg_emb = model.encode(edu_segments, convert_to_tensor=True)
+        resume_segments_with_edu = resume_segments + edu_segments
+        segment_embeddings_with_edu = (
+            torch.cat([segment_embeddings, edu_seg_emb], dim=0)
+            if segment_embeddings is not None else edu_seg_emb
+        )
+    else:
+        resume_segments_with_edu = resume_segments
+        segment_embeddings_with_edu = segment_embeddings
+
+    edu_level, edu_label = detect_resume_education_level(parsed_resume)
 
     explicit_skills = parsed_resume.get("explicit_skills")
     if explicit_skills is None:
@@ -374,6 +555,10 @@ def precompute_resume_embeddings(parsed_resume):
     return {
         "resume_segments": resume_segments,
         "segment_embeddings": segment_embeddings,
+        "resume_segments_with_edu": resume_segments_with_edu,
+        "segment_embeddings_with_edu": segment_embeddings_with_edu,
+        "edu_level": edu_level,
+        "edu_label": edu_label,
         "skills": explicit_skills,
         "skills_emb": skills_emb,
         "experience": experience,
@@ -531,42 +716,76 @@ def compute_breakdown_scores(parsed_resume, job_description, job_title=None,
 
 def match_resume_to_job(parsed_resume, job_description, job_title=None):
     """Main entry point. Returns a match score, explanation, and breakdown."""
-    expanded_description = expand_job_description_with_occupation(job_title, job_description)
+    req_edu_level, req_edu_label = detect_required_education(job_description, job_title)
     precomputed = precompute_resume_embeddings(parsed_resume)
 
+    if req_edu_level > 0 and precomputed["edu_level"] < req_edu_level:
+        return {
+            "match_score": 0.0,
+            "comment": f"Not matched — this role requires {req_edu_label}.",
+            "breakdown": {"skills_score": 0.0, "experience_score": 0.0, "title_score": 0.0, "matched_skills": []},
+            "education_qualified": False,
+            "required_education": req_edu_label,
+        }
+
+    expanded_description = expand_job_description_with_occupation(job_title, job_description)
+    use_edu = req_edu_level > 0
+    segments = precomputed["resume_segments_with_edu"] if use_edu else precomputed["resume_segments"]
+    seg_emb = precomputed["segment_embeddings_with_edu"] if use_edu else precomputed["segment_embeddings"]
+
     score = compute_semantic_match_score(
-        precomputed["resume_segments"],
+        segments,
         expanded_description,
-        precomputed_segment_embeddings=precomputed["segment_embeddings"]
+        precomputed_segment_embeddings=seg_emb
     )
     comment, _matched = generate_match_comment(score, precomputed["skills"], expanded_description)
     breakdown = compute_breakdown_scores(
         parsed_resume, expanded_description, job_title, precomputed_resume=precomputed
     )
 
-    return {"match_score": score, "comment": comment, "breakdown": breakdown}
+    return {
+        "match_score": score,
+        "comment": comment,
+        "breakdown": breakdown,
+        "education_qualified": True,
+        "required_education": req_edu_label,
+    }
 
 
 def rank_jobs_for_resume(parsed_resume, job_listings):
     """
     Ranks a list of job listings against a resume by match score.
     Uses pre-computed resume embeddings and cached JD embeddings for high performance.
+    Jobs that require a higher education level than the resume has are excluded,
+    and jobs that require a degree include the resume's Education section in scoring.
     """
     precomputed = precompute_resume_embeddings(parsed_resume)
     resume_segments = precomputed["resume_segments"]
     segment_emb = precomputed["segment_embeddings"]
+    resume_segments_with_edu = precomputed["resume_segments_with_edu"]
+    segment_emb_with_edu = precomputed["segment_embeddings_with_edu"]
+    resume_edu_level = precomputed["edu_level"]
     skills = precomputed["skills"]
 
     results = []
 
     for job in job_listings:
+        req_edu_level, req_edu_label = detect_required_education(
+            job.get("description", ""), job.get("title", "")
+        )
+        # Exclude jobs requiring a higher education level than the candidate has
+        if req_edu_level > 0 and resume_edu_level < req_edu_level:
+            continue
+
         expanded_description = expand_job_description_with_occupation(
             job.get("title"), job["description"]
         )
+        # Include education segments only when the job listing requires a degree
+        use_edu = req_edu_level > 0
         score = compute_semantic_match_score(
-            resume_segments,
+            resume_segments_with_edu if use_edu else resume_segments,
             expanded_description,
-            precomputed_segment_embeddings=segment_emb
+            precomputed_segment_embeddings=(segment_emb_with_edu if use_edu else segment_emb)
         )
         comment, _matched = generate_match_comment(
             score, skills, expanded_description
@@ -577,7 +796,13 @@ def rank_jobs_for_resume(parsed_resume, job_listings):
             job.get("title"),
             precomputed_resume=precomputed
         )
-        results.append({**job, "match_score": score, "comment": comment, "breakdown": breakdown})
+        results.append({
+            **job,
+            "match_score": score,
+            "comment": comment,
+            "breakdown": breakdown,
+            "required_education": req_edu_label,
+        })
 
     raw_scores = [r["match_score"] for r in results]
     if raw_scores:

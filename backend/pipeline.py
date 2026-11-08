@@ -2,7 +2,7 @@
 Connects resume parsing and job matching into a single flow:
 resume -> parse_resume() -> rank_jobs_for_resume() -> matches.
 
-Defaults to fetching from all scrapers (PhilJobNet, Adzuna, OnlineJobs)
+Defaults to fetching from all sources (PhilJobNet, Adzuna, OnlineJobs, plus JSearch for PH)
 and automatically derives search queries from resume skills.
 """
 
@@ -18,6 +18,9 @@ logger = logging.getLogger("resumeaid.pipeline")
 
 DEFAULT_COUNTRY = "ph"
 
+# API sources whose results depend on the searched country (used in cache keys)
+COUNTRY_SCOPED_SOURCES = {"adzuna", "jsearch"}
+
 try:
     from philjobnet_scraper import search_jobs as search_philjobnet
     PHILJOBNET_AVAILABLE = True
@@ -25,7 +28,13 @@ except ImportError:
     PHILJOBNET_AVAILABLE = False
 
 try:
-    from job_scraper import search_jobs as search_jsearch
+    from job_scraper import search_jobs as search_adzuna
+    ADZUNA_AVAILABLE = True
+except ImportError:
+    ADZUNA_AVAILABLE = False
+
+try:
+    from jsearch_scraper import search_jobs as search_jsearch
     JSEARCH_AVAILABLE = True
 except ImportError:
     JSEARCH_AVAILABLE = False
@@ -37,7 +46,7 @@ except ImportError:
     ONLINEJOBS_AVAILABLE = False
 
 try:
-    from resume_improver import analyze_parsed_resume, print_report
+    from resume_improver import analyze_parsed_resume, print_report, build_checklist
     IMPROVER_AVAILABLE = True
 except ImportError:
     IMPROVER_AVAILABLE = False
@@ -331,13 +340,25 @@ def _try_fetch_philjobnet(query, max_results):
 
 def _try_fetch_adzuna(query, country, results_per_page):
     """Fetches Adzuna API listings, returning [] on failure."""
-    if not JSEARCH_AVAILABLE:
+    if not ADZUNA_AVAILABLE:
         logger.warning("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
+        return []
+    try:
+        return search_adzuna(query, country=country, results_per_page=results_per_page)
+    except Exception as e:
+        logger.warning("Couldn't fetch live Adzuna listings (%s)", e)
+        return []
+
+
+def _try_fetch_jsearch(query, country, results_per_page):
+    """Fetches JSearch (RapidAPI) listings, returning [] on failure."""
+    if not JSEARCH_AVAILABLE:
+        logger.warning("jsearch_scraper.py not found or 'requests' not installed — skipping JSearch")
         return []
     try:
         return search_jsearch(query, country=country, results_per_page=results_per_page)
     except Exception as e:
-        logger.warning("Couldn't fetch live Adzuna listings (%s)", e)
+        logger.warning("Couldn't fetch live JSearch listings (%s)", e)
         return []
 
 
@@ -386,10 +407,15 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
 
     if source in ("all", "both"):
         requested_sources = ["philjobnet", "onlinejobs", "adzuna"]
+        # JSearch covers the Philippines (Adzuna does not), so add it only for PH searches.
+        if (country or "").lower() == "ph":
+            requested_sources.append("jsearch")
     elif source == "onlinejobs":
         requested_sources = ["onlinejobs"]
-    elif source in ("adzuna", "jsearch"):
+    elif source == "adzuna":
         requested_sources = ["adzuna"]
+    elif source == "jsearch":
+        requested_sources = ["jsearch"]
     else:
         requested_sources = ["philjobnet"]
 
@@ -400,7 +426,7 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
 
     if CACHE_AVAILABLE and not force_refresh:
         for src in requested_sources:
-            cached_res = get_cached_jobs(src, search_query, country=(country if src == "adzuna" else None))
+            cached_res = get_cached_jobs(src, search_query, country=(country if src in COUNTRY_SCOPED_SOURCES else None))
             if cached_res and cached_res.get("jobs"):
                 cached_jobs_map[src] = cached_res["jobs"]
                 cached_sources.append(src)
@@ -419,6 +445,8 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
                 return src, _try_fetch_philjobnet(search_query, results_per_source)
             elif src == "adzuna":
                 return src, _try_fetch_adzuna(search_query, country, results_per_source)
+            elif src == "jsearch":
+                return src, _try_fetch_jsearch(search_query, country, results_per_source)
             elif src == "onlinejobs":
                 # Max 6 results to respect crawl rate and keep latency reasonable
                 return src, _try_fetch_onlinejobs(search_query, min(results_per_source, 6))
@@ -432,11 +460,11 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
                     live_sources.append(src)
                     cached_jobs_map[src] = scraped_jobs
                     if CACHE_AVAILABLE:
-                        set_cached_jobs(src, search_query, scraped_jobs, country=(country if src == "adzuna" else None))
+                        set_cached_jobs(src, search_query, scraped_jobs, country=(country if src in COUNTRY_SCOPED_SOURCES else None))
                 else:
                     # Fallback to stale cached data if live scrape returned nothing
                     if CACHE_AVAILABLE:
-                        stale_res = get_cached_jobs(src, search_query, country=(country if src == "adzuna" else None), allow_stale=True)
+                        stale_res = get_cached_jobs(src, search_query, country=(country if src in COUNTRY_SCOPED_SOURCES else None), allow_stale=True)
                         if stale_res and stale_res.get("jobs"):
                             logger.warning("Using stale cache (%d jobs) for '%s' after live scrape returned empty",
                                            len(stale_res["jobs"]), src)
@@ -482,10 +510,12 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
     logger.info("Detected %d skill(s)", len(parsed_resume.get("skills") or []))
 
     # Run diagnostics and temporarily apply suggested skills for matching
-    health_check = {"issues": [], "suggestions": [], "suggested_skills": []}
+    health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
     if IMPROVER_AVAILABLE:
         issues, suggestions, suggested_skills = analyze_parsed_resume(parsed_resume, resume_filepath)
-        health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": suggested_skills}
+        # Checklist reflects what was actually in the file (before auto-applied skills)
+        health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": suggested_skills,
+                        "checklist": build_checklist(parsed_resume)}
         print()
         print_report(resume_filepath, issues, suggestions, suggested_skills)
 
@@ -499,6 +529,69 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
             logger.info("Auto-applied %d suggested skill(s) for this matching run "
                         "(the resume file itself is unchanged).", len(suggested_skills))
 
+    return _search_and_rank(parsed_resume, health_check, job_listings, search_query, country, source, force_refresh)
+
+
+def _clean_text(value, max_len):
+    return (str(value).strip()[:max_len] or None) if value else None
+
+
+def profile_to_parsed_resume(profile):
+    """
+    Turns a user-edited profile (from the web UI's resume editor) into the
+    parsed-resume shape the matcher expects. The user confirmed these
+    skills, so they are all treated as explicit (high-confidence) skills.
+    """
+    skills, seen = [], set()
+    for raw in profile.get("skills") or []:
+        skill = str(raw).strip()[:80]
+        if skill and skill.lower() not in seen:
+            seen.add(skill.lower())
+            skills.append(skill)
+        if len(skills) >= 100:
+            break
+
+    experience = _clean_text(profile.get("experience"), 20000)
+    education = _clean_text(profile.get("education"), 20000)
+    raw_sections = {}
+    if skills:
+        raw_sections["skills"] = ", ".join(skills)
+    if experience:
+        raw_sections["experience"] = experience
+    if education:
+        raw_sections["education"] = education
+
+    return {
+        "name": _clean_text(profile.get("name"), 120),
+        "email": _clean_text(profile.get("email"), 200),
+        "phone": _clean_text(profile.get("phone"), 50),
+        "skills": skills,
+        "explicit_skills": skills,
+        "inline_skills": [],
+        "education": education,
+        "experience": experience,
+        "detected_section_names": list(raw_sections.keys()),
+        "raw_sections": raw_sections,
+    }
+
+
+def run_pipeline_from_profile(profile, search_query=None, country=DEFAULT_COUNTRY, source="all", force_refresh=False):
+    """
+    Re-runs matching from an edited profile instead of a file: no parsing,
+    and the job cache makes it near-instant when the search query is unchanged.
+    """
+    parsed_resume = profile_to_parsed_resume(profile)
+    health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
+    if IMPROVER_AVAILABLE:
+        # No file path: skips the raw-text checks (suggested skills, word count)
+        issues, suggestions, _ = analyze_parsed_resume(parsed_resume, "")
+        health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": [],
+                        "checklist": build_checklist(parsed_resume)}
+    return _search_and_rank(parsed_resume, health_check, None, search_query, country, source, force_refresh)
+
+
+def _search_and_rank(parsed_resume, health_check, job_listings, search_query, country, source, force_refresh):
+    """Shared tail of both pipelines: pick a query, fetch listings, rank them."""
     search_info = {
         "query": search_query,
         "confidence": None,
@@ -559,13 +652,13 @@ def _parse_args(argv=None):
     """CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Parse a resume and rank live job listings against it.",
-        epilog="--country applies to the Adzuna source; 'ph' is not supported by Adzuna and auto-falls back to 'gb'.",
+        epilog="--country applies to Adzuna and JSearch; 'ph' is not supported by Adzuna and auto-falls back to 'gb', and JSearch is added automatically when the country is 'ph'.",
     )
     parser.add_argument("resume_path", help="Path to a .pdf or .docx resume")
     parser.add_argument("--query", default=None,
                         help="Custom search query (default: auto-derived from the resume)")
     parser.add_argument("--country", default=DEFAULT_COUNTRY, help=f"Country code (default: {DEFAULT_COUNTRY})")
-    parser.add_argument("--source", default="all", choices=["all", "philjobnet", "adzuna", "onlinejobs"],
+    parser.add_argument("--source", default="all", choices=["all", "philjobnet", "adzuna", "jsearch", "onlinejobs"],
                         help="Job source (default: all, merged and ranked together)")
     parser.add_argument("--refresh", "--force-refresh", action="store_true",
                         help="Force live scraping, bypassing the local job cache")

@@ -41,6 +41,13 @@ const state = {
   darkMode: localStorage.getItem('ra_dark') === 'true',
   analysisController: null,
   filters: defaultFilters(),
+  // Editable profile: baseProfile = what the last results were scored with,
+  // profile = the user's working copy in the Resume view
+  baseProfile: null,
+  profile: null,
+  usingEditedProfile: false,  // true once matches come from /api/rematch
+  suggestedSkills: [],        // skills found in the resume body at upload
+  notes: [],                  // file-level issues (e.g. very short text)
   // Filter panel starts open on desktop, collapsed on phones
   filtersOpen: window.matchMedia('(min-width: 769px)').matches,
 };
@@ -118,12 +125,16 @@ function bindAll() {
 
   // Start resume analysis
   $('btn-analyse').addEventListener('click', () => runAnalysis(false));
-  $('btn-refresh-listings').addEventListener('click', () => runAnalysis(true));
+  $('btn-refresh-listings').addEventListener('click', refreshListings);
 
   // Resume health check overlay
   $('rc-close').addEventListener('click', () => closeOverlay('overlay-resume-check'));
   $('rc-backdrop').addEventListener('click', () => closeOverlay('overlay-resume-check'));
   $('btn-continue').addEventListener('click', () => closeOverlay('overlay-resume-check', () => switchView('matches')));
+  $('btn-fix-resume').addEventListener('click', () => closeOverlay('overlay-resume-check', () => switchView('resume')));
+
+  // Editable profile on the Resume view
+  bindProfileEditor();
 
   // Job match detail modal
   $('modal-match-close').addEventListener('click', () => closeModal('modal-match'));
@@ -224,6 +235,8 @@ function runAnalysis(forceRefresh = false) {
 
   setLoading(true);
   animateLoadingSteps();
+  if (forceRefresh) setRefreshing(true, 'Refreshing listings…',
+    'Fetching the latest jobs from the job boards. This can take up to a minute.');
 
   const fd = new FormData();
   fd.append('resume', state.selectedFile, state.selectedFile.name);
@@ -248,15 +261,16 @@ function runAnalysis(forceRefresh = false) {
       return body;
     })
     .then(data => {
-      state.lastResponse = data;
       // New results → start from "Best match" with no filters applied
-      state.filters = defaultFilters();
-      syncFilterControls();
-      updateMatchBadge(data.matches?.length ?? 0);
-      if (data.search_info?.is_placeholder) {
-        toast('No live listings found right now — showing sample roles instead.', true);
-      }
-      if (data.health_check?.issues?.length > 0) {
+      applyResponse(data, { resetFilters: true });
+      state.usingEditedProfile = false;
+      state.suggestedSkills = data.health_check?.suggested_skills || [];
+      state.notes = extraNotes(data.health_check);
+      const checklist = data.health_check?.checklist;
+      const needsFixing = checklist?.length
+        ? checklist.some(i => i.status !== 'ok')
+        : data.health_check?.issues?.length > 0;
+      if (needsFixing) {
         showResumeCheck(data);
       } else {
         switchView('matches');
@@ -272,7 +286,29 @@ function runAnalysis(forceRefresh = false) {
       clearTimeout(tId);
       state.analysisController = null;
       setLoading(false);
+      setRefreshing(false);
     });
+}
+
+// Full-screen busy overlay (refreshing listings / updating matches)
+function setRefreshing(on, title, sub) {
+  const overlay = $('refresh-overlay');
+  if (!overlay) return;
+  overlay.classList.toggle('hidden', !on);
+  const btn = $('btn-refresh-listings');
+  if (btn) btn.disabled = on;
+  const update = $('btn-update-matches');
+  if (update && on) update.disabled = true;
+  if (on) {
+    if (title) $('refresh-overlay-title').textContent = title;
+    if (sub) $('refresh-overlay-sub').textContent = sub;
+    const bar = $('refresh-bar');
+    bar.style.animation = 'none';
+    void bar.offsetWidth;
+    bar.style.animation = '';
+  } else if (state.profile) {
+    refreshProfileStatus();  // re-enables "Update matches" if still dirty
+  }
 }
 
 function setLoading(on) {
@@ -320,45 +356,6 @@ function updateMatchBadge(count) {
   }
 }
 
-// Display resume issues and skill suggestions
-function showResumeCheck(data) {
-  const hc = data.health_check;
-  const issuesEl = $('rc-issues');
-  issuesEl.innerHTML = '';
-
-  (hc.issues || []).forEach((txt, i) => {
-    const el = document.createElement('div');
-    el.className = 'rc-issue';
-    el.style.animationDelay = `${i * 0.06}s`;
-    el.innerHTML = `
-      <div class="rc-issue-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-      </div>
-      <p class="rc-issue-text">${esc(txt)}</p>`;
-    issuesEl.appendChild(el);
-  });
-
-  const skillsWrap = $('rc-skills-section');
-  const skillsEl = $('rc-skills');
-  skillsEl.innerHTML = '';
-  const skills = hc.suggested_skills || [];
-  if (skills.length) {
-    skillsWrap.classList.remove('hidden');
-    skills.forEach((s, i) => {
-      const c = document.createElement('span');
-      c.className = 'chip'; c.style.animationDelay = `${i * 0.04}s`;
-      c.textContent = s; skillsEl.appendChild(c);
-    });
-  } else {
-    skillsWrap.classList.add('hidden');
-  }
-
-  openOverlay('overlay-resume-check');
-}
-
 // Render, filter and sort job match cards
 function renderMatches() {
   const data = state.lastResponse;
@@ -394,7 +391,8 @@ function renderMatches() {
   const placeholder = !!info.is_placeholder;
   const noun = placeholder ? 'sample role' : 'live role';
   const query = info.query ? ` for “${info.query}”` : '';
-  sub.textContent = `${all.length} ${noun}${all.length === 1 ? '' : 's'} matched${query}`;
+  sub.textContent = `${all.length} ${noun}${all.length === 1 ? '' : 's'} matched${query}`
+    + (state.usingEditedProfile ? ' · scored with your edited profile' : '');
 
   const active = activeFilterCount();
   $('mf-result-count').textContent = active || state.filters.q
@@ -429,7 +427,7 @@ const TYPE_LABELS = {
   freelance: 'Freelance', internship: 'Internship',
 };
 const SOURCE_LABELS = {
-  philjobnet: 'PhilJobNet', onlinejobs: 'OnlineJobs.ph', adzuna: 'Adzuna', sample: 'Sample',
+  philjobnet: 'PhilJobNet', onlinejobs: 'OnlineJobs.ph', adzuna: 'Adzuna', jsearch: 'JSearch', sample: 'Sample',
 };
 
 function bindFilters() {
@@ -701,6 +699,7 @@ function showMatchDetail(match) {
   }
   if (match.work_mode) facts.push(['Work setup', MODE_LABELS[match.work_mode] || match.work_mode]);
   if (match.employment_type) facts.push(['Job type', TYPE_LABELS[match.employment_type] || match.employment_type]);
+  if (match.required_education) facts.push(['Education', match.required_education]);
   if (match.posted_at) facts.push(['Posted', postedLabel(match.posted_at)]);
   if (SOURCE_LABELS[match.source]) facts.push(['Job board', SOURCE_LABELS[match.source]]);
   $('modal-facts').innerHTML = facts.map(([k, v, sub]) =>
@@ -780,74 +779,361 @@ function showMatchDetail(match) {
   openModal('modal-match');
 }
 
-// Render parsed resume summary inline
+// ── Resume check + editable profile ──────────────────────────
+// The parsed resume becomes an editable profile. Edits never touch the
+// uploaded file; "Update matches" re-ranks listings via /api/rematch.
+
+const PROFILE_FIELDS = ['name', 'email', 'phone', 'skills', 'experience', 'education'];
+const FIELD_INPUTS = {
+  name: 'pf-name', email: 'pf-email', phone: 'pf-phone',
+  skills: 'skill-add-input', experience: 'pf-experience', education: 'pf-education',
+};
+const MAX_SKILLS = 100;
+
+function profileFromSummary(s = {}) {
+  return {
+    name: s.name || '',
+    email: s.email || '',
+    phone: s.phone || '',
+    skills: [...(s.skills || [])],
+    experience: s.experience || '',
+    education: s.education || '',
+  };
+}
+
+function cloneProfile(p) { return { ...p, skills: [...p.skills] }; }
+
+// Comparable form: trimmed text, case-insensitive skill set
+function normProfile(p) {
+  return {
+    name: p.name.trim(), email: p.email.trim(), phone: p.phone.trim(),
+    skills: p.skills.map(s => s.trim().toLowerCase()).filter(Boolean).sort(),
+    experience: p.experience.trim(), education: p.education.trim(),
+  };
+}
+
+function profileDiff(a, b) {
+  const na = normProfile(a), nb = normProfile(b);
+  return PROFILE_FIELDS.filter(f => JSON.stringify(na[f]) !== JSON.stringify(nb[f]));
+}
+
+// Same rules as resume_improver.build_checklist(), run live as the user types
+function checklistFor(p) {
+  const n = p.skills.length;
+  const has = v => !!v.trim();
+  return [
+    { field: 'name', label: 'Name', status: has(p.name) ? 'ok' : 'missing',
+      message: has(p.name) ? 'Added.' : 'Add your full name.' },
+    { field: 'email', label: 'Email', status: has(p.email) ? 'ok' : 'missing',
+      message: has(p.email) ? 'Added.' : 'Employers need a way to reach you.' },
+    { field: 'phone', label: 'Phone', status: has(p.phone) ? 'ok' : 'missing',
+      message: has(p.phone) ? 'Added.' : 'Add a contact number.' },
+    { field: 'skills', label: 'Skills', status: n === 0 ? 'missing' : n < 3 ? 'warn' : 'ok',
+      message: n === 0 ? 'Skills drive most of the match score.'
+        : n < 3 ? `Only ${n} listed — add a few more.` : `${n} skills listed.` },
+    { field: 'experience', label: 'Experience', status: has(p.experience) ? 'ok' : 'missing',
+      message: has(p.experience) ? 'Added.' : 'Add a short summary of your work.' },
+    { field: 'education', label: 'Education', status: has(p.education) ? 'ok' : 'missing',
+      message: has(p.education) ? 'Added.' : 'Add your highest education.' },
+  ];
+}
+
+const STATUS_ICON = {
+  ok: '<path d="M20 6 9 17l-5-5"/>',
+  warn: '<path d="M12 8v5M12 16.5v.01"/><circle cx="12" cy="12" r="9"/>',
+  missing: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>',
+};
+const STATUS_TEXT = { ok: 'Done', warn: 'Could improve', missing: 'Missing' };
+
+function checklistItemHTML(item) {
+  return `
+    <span class="rc-item-icon" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round">${STATUS_ICON[item.status]}</svg>
+    </span>
+    <span class="rc-item-body">
+      <span class="rc-item-label">${esc(item.label)}<span class="visually-hidden"> — ${STATUS_TEXT[item.status]}</span></span>
+      <span class="rc-item-msg">${esc(item.message)}</span>
+    </span>`;
+}
+
+// Fills a <ul> with checklist rows; rows jump to the matching field
+function renderChecklist(listEl, items, onPick) {
+  listEl.innerHTML = '';
+  items.forEach(item => {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `rc-item is-${item.status}`;
+    btn.innerHTML = checklistItemHTML(item);
+    btn.addEventListener('click', () => onPick(item.field));
+    li.appendChild(btn);
+    listEl.appendChild(li);
+  });
+}
+
+function renderNotes(el, notes) {
+  el.classList.toggle('hidden', !notes.length);
+  el.innerHTML = notes.map(n => `<p>${esc(n)}</p>`).join('');
+}
+
+// Issues that aren't about a single editable field (e.g. very short text)
+function extraNotes(hc) {
+  return (hc?.issues || []).filter(t => /very short|parsing issue/i.test(t));
+}
+
+function focusField(field) {
+  switchView('resume');
+  const input = $(FIELD_INPUTS[field]);
+  if (!input) return;
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => input.focus({ preventScroll: true }), 250);
+}
+
+// Popup right after analysis: what's missing in the file itself
+function showResumeCheck(data) {
+  const hc = data.health_check || {};
+  const items = (hc.checklist && hc.checklist.length)
+    ? hc.checklist
+    : checklistFor(profileFromSummary(data.resume_summary));
+  const todo = items.filter(i => i.status !== 'ok');
+  // Problems first, then what's already fine
+  renderChecklist($('rc-overlay-list'), [...todo, ...items.filter(i => i.status === 'ok')],
+    field => closeOverlay('overlay-resume-check', () => focusField(field)));
+  renderNotes($('rc-overlay-notes'), extraNotes(hc));
+  $('rc-overlay-badge-text').textContent = todo.length
+    ? `${todo.length} thing${todo.length === 1 ? '' : 's'} to fix`
+    : 'A few things to check';
+  openOverlay('overlay-resume-check');
+}
+
+// Takes a server response: stores it and resets the editor to match it
+function applyResponse(data, { resetFilters }) {
+  state.lastResponse = data;
+  state.baseProfile = profileFromSummary(data.resume_summary);
+  state.profile = cloneProfile(state.baseProfile);
+  if (resetFilters) {
+    state.filters = defaultFilters();
+    syncFilterControls();
+  }
+  updateMatchBadge(data.matches?.length ?? 0);
+  if (data.search_info?.is_placeholder) {
+    toast('No live listings found right now — showing sample roles instead.', true);
+  }
+}
+
+function bindProfileEditor() {
+  const textFields = { name: 'pf-name', email: 'pf-email', phone: 'pf-phone', experience: 'pf-experience', education: 'pf-education' };
+  Object.entries(textFields).forEach(([field, id]) => {
+    $(id).addEventListener('input', e => {
+      if (!state.profile) return;
+      state.profile[field] = e.target.value;
+      if (field === 'name') $('profile-avatar').textContent = initials(e.target.value.trim() || '?');
+      refreshProfileStatus();
+    });
+  });
+
+  $('skill-add-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const input = $('skill-add-input');
+    addSkills(input.value.split(/[,;\n]/));
+    input.value = '';
+    input.focus();
+  });
+
+  $('skill-suggest-all').addEventListener('click', () => addSkills(pendingSuggestions()));
+  $('btn-reset-profile').addEventListener('click', () => {
+    if (!state.baseProfile) return;
+    state.profile = cloneProfile(state.baseProfile);
+    renderResume();
+  });
+  $('btn-update-matches').addEventListener('click', updateMatches);
+}
+
+function addSkills(list) {
+  if (!state.profile) return 0;
+  const have = new Set(state.profile.skills.map(s => s.toLowerCase()));
+  let added = 0;
+  list.map(s => s.trim()).filter(Boolean).forEach(s => {
+    const skill = s.slice(0, 80);
+    if (have.has(skill.toLowerCase()) || state.profile.skills.length >= MAX_SKILLS) return;
+    have.add(skill.toLowerCase());
+    state.profile.skills.push(skill);
+    added++;
+  });
+  if (state.profile.skills.length >= MAX_SKILLS) toast(`You can list up to ${MAX_SKILLS} skills.`, true);
+  renderSkillEditor();
+  refreshProfileStatus();
+  return added;
+}
+
+function removeSkill(index) {
+  state.profile.skills.splice(index, 1);
+  renderSkillEditor();
+  refreshProfileStatus();
+}
+
+// Suggested skills (found in the resume body) not yet in the profile
+function pendingSuggestions() {
+  const have = new Set((state.profile?.skills || []).map(s => s.toLowerCase()));
+  const hc = state.lastResponse?.health_check;
+  return (state.suggestedSkills || hc?.suggested_skills || []).filter(s => !have.has(s.toLowerCase()));
+}
+
+function renderSkillEditor() {
+  const p = state.profile;
+  const el = $('resume-skills');
+  el.innerHTML = '';
+  if (!p.skills.length) {
+    el.innerHTML = '<p class="field-empty">No skills yet — add some below.</p>';
+  }
+  p.skills.forEach((sk, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip chip-edit';
+    chip.innerHTML = `<span>${esc(sk)}</span>
+      <button type="button" class="chip-x" aria-label="Remove ${esc(sk)}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>`;
+    chip.querySelector('.chip-x').addEventListener('click', () => removeSkill(i));
+    el.appendChild(chip);
+  });
+  $('skills-count').textContent = p.skills.length ? `${p.skills.length} listed` : '';
+
+  const pending = pendingSuggestions();
+  $('skill-suggest').classList.toggle('hidden', !pending.length);
+  const list = $('skill-suggest-list');
+  list.innerHTML = '';
+  pending.forEach(sk => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip chip-suggest';
+    b.innerHTML = `<span aria-hidden="true">+</span> ${esc(sk)}`;
+    b.setAttribute('aria-label', `Add ${sk}`);
+    b.addEventListener('click', () => addSkills([sk]));
+    list.appendChild(b);
+  });
+}
+
+// Live checklist, field badges and save bar — cheap, runs on every keystroke
+function refreshProfileStatus() {
+  const p = state.profile;
+  if (!p) return;
+  const items = checklistFor(p);
+  const done = items.filter(i => i.status === 'ok').length;
+
+  $('rc-score').textContent = `${done}/${items.length}`;
+  $('rc-progress-fill').style.width = `${(done / items.length) * 100}%`;
+  $('rc-card').classList.toggle('is-complete', done === items.length);
+  $('rc-card-sub').textContent = done === items.length
+    ? 'All sections complete — nice.'
+    : `${items.length - done} section${items.length - done === 1 ? '' : 's'} need${items.length - done === 1 ? 's' : ''} attention`;
+  renderChecklist($('rc-checklist'), items, focusField);
+
+  items.forEach(item => {
+    $$(`[data-status-for="${item.field}"]`).forEach(badge => {
+      badge.className = `field-status is-${item.status}`;
+      badge.textContent = item.status === 'ok' ? '' : STATUS_TEXT[item.status];
+    });
+  });
+
+  const changed = state.baseProfile ? profileDiff(p, state.baseProfile) : [];
+  const dirty = changed.length > 0;
+  $('btn-update-matches').disabled = !dirty;
+  $('btn-reset-profile').disabled = !dirty;
+  $('edit-bar').classList.toggle('is-dirty', dirty);
+  $('edit-bar-text').textContent = dirty
+    ? `Unsaved changes: ${changed.map(f => items.find(i => i.field === f).label.toLowerCase()).join(', ')}`
+    : state.usingEditedProfile ? 'Your matches use this edited profile.' : 'No changes yet';
+}
+
 function renderResume() {
   const data = state.lastResponse;
-  if (!data?.resume_summary) {
+  if (!data?.resume_summary || !state.profile) {
     $('resume-empty').classList.remove('hidden');
     $('resume-content').classList.add('hidden');
     return;
   }
-
-  const s = data.resume_summary;
   $('resume-empty').classList.add('hidden');
   $('resume-content').classList.remove('hidden');
 
-  const name = s.name || 'Unknown';
-  $('profile-name').textContent = name;
-  $('profile-email').textContent = s.email || '';
-  $('profile-avatar').textContent = initials(name);
+  const p = state.profile;
+  $('pf-name').value = p.name;
+  $('pf-email').value = p.email;
+  $('pf-phone').value = p.phone;
+  $('pf-experience').value = p.experience;
+  $('pf-education').value = p.education;
+  $('profile-avatar').textContent = initials(p.name.trim() || '?');
 
-  const skillsEl = $('resume-skills');
-  skillsEl.innerHTML = '';
-  (s.skills || []).forEach((sk, i) => {
-    const c = document.createElement('span');
-    c.className = 'chip'; c.style.animationDelay = `${i * 0.04}s`;
-    c.textContent = sk; skillsEl.appendChild(c);
+  renderSkillEditor();
+  renderNotes($('rc-notes'), state.notes || []);
+  refreshProfileStatus();
+}
+
+function updateMatches() {
+  if (!state.profile || state.analysisController) return;
+  const changed = profileDiff(state.profile, state.baseProfile);
+  // Only skills/experience affect the search query; otherwise reuse it so
+  // the listings come straight from the cache and nothing is re-scraped.
+  const newSearch = changed.includes('skills') || changed.includes('experience');
+  rematch(state.profile, {
+    query: newSearch ? null : state.lastResponse?.search_info?.query,
+    title: 'Updating your matches…',
+    sub: newSearch
+      ? 'Re-scoring with your edits. New skills can mean a fresh job search, which may take up to a minute.'
+      : 'Re-scoring listings with your edits…',
+    successMsg: 'Matches updated with your edits.',
   });
+}
 
-  $('resume-experience').textContent = s.experience || 'No experience information detected.';
-  $('resume-education').textContent = s.education || 'No education information detected.';
+// Re-ranks listings from a profile without re-uploading the file
+function rematch(profile, { query = null, refresh = false, title, sub, successMsg }) {
+  const ctrl = new AbortController();
+  state.analysisController = ctrl;
+  const tId = setTimeout(() => ctrl.abort(), 180_000);
+  setRefreshing(true, title, sub);
 
-  // ── Inline resume check ──────────────────────────────────
-  const hc = data.health_check;
-  const rcInline = $('resume-check-inline');
-  if (hc?.issues?.length > 0) {
-    rcInline.classList.remove('hidden');
-
-    const issuesEl = $('rc-inline-issues');
-    issuesEl.innerHTML = '';
-    (hc.issues || []).forEach((txt, i) => {
-      const el = document.createElement('div');
-      el.className = 'rc-inline-issue';
-      el.style.animationDelay = `${i * 0.06}s`;
-      el.innerHTML = `
-        <div class="rc-issue-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-        </div>
-        <p class="rc-issue-text">${esc(txt)}</p>`;
-      issuesEl.appendChild(el);
+  fetch(`${API_BASE}/api/rematch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile, query, country: state.country, refresh }),
+    signal: ctrl.signal,
+  })
+    .then(async r => {
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(body?.error || 'Couldn’t update your matches — please try again.');
+      if (!body) throw new Error('Invalid response from server.');
+      return body;
+    })
+    .then(data => {
+      applyResponse(data, { resetFilters: false });
+      state.usingEditedProfile = true;
+      if (successMsg) toast(successMsg);
+      switchView('matches');
+    })
+    .catch(err => {
+      let msg = err.message || 'Network error.';
+      if (err.name === 'AbortError') msg = 'Request timed out — the server took too long.';
+      else if (err instanceof TypeError) msg = 'Can’t reach the server. Check that the backend is running.';
+      toast(msg, true);
+    })
+    .finally(() => {
+      clearTimeout(tId);
+      state.analysisController = null;
+      setRefreshing(false);
     });
+}
 
-    const skillsSection = $('rc-inline-skills-section');
-    const inlineSkillsEl = $('rc-inline-skills');
-    inlineSkillsEl.innerHTML = '';
-    const suggestedSkills = hc.suggested_skills || [];
-    if (suggestedSkills.length) {
-      skillsSection.classList.remove('hidden');
-      suggestedSkills.forEach((sk, i) => {
-        const c = document.createElement('span');
-        c.className = 'chip'; c.style.animationDelay = `${i * 0.04}s`;
-        c.textContent = sk; inlineSkillsEl.appendChild(c);
-      });
-    } else {
-      skillsSection.classList.add('hidden');
-    }
+// Refresh keeps profile edits: if they've been applied, re-search from them
+function refreshListings() {
+  if (state.usingEditedProfile && state.baseProfile) {
+    rematch(state.baseProfile, {
+      query: state.lastResponse?.search_info?.query,
+      refresh: true,
+      title: 'Refreshing listings…',
+      sub: 'Fetching the latest jobs from the job boards. This can take up to a minute.',
+    });
   } else {
-    rcInline.classList.add('hidden');
+    runAnalysis(true);
   }
 }
 

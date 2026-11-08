@@ -6,7 +6,7 @@ Each scraper exposes whatever raw fields its site provides (salary text,
 enrich_job() turns those into one consistent shape the frontend can filter
 and sort on:
 
-    source           "philjobnet" | "onlinejobs" | "adzuna" | "sample" | None
+    source           "philjobnet" | "onlinejobs" | "adzuna" | "jsearch" | "sample" | None
     salary           {text, min, max, currency, period, monthly_php_min,
                       monthly_php_max, is_estimate} or None
     work_mode        "remote" | "hybrid" | "onsite" | None (unknown)

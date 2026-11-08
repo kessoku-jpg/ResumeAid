@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ResumeAid — Resume-to-job matching for Filipino job seekers</title>
   <meta name="description"
-    content="ResumeAid compares the meaning of your resume with live listings from PhilJobNet, OnlineJobs.ph and Adzuna using Sentence-BERT, then scores each role on skills, experience and title." />
+    content="ResumeAid compares the meaning of your resume with live listings from PhilJobNet, OnlineJobs.ph, JSearch and Adzuna using Sentence-BERT, then scores each role on skills, experience and title." />
   <!-- IBM Plex is self-hosted (see @font-face in style.css) so the UI works offline -->
   <link rel="preload" href="fonts/plex-sans-400-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="fonts/plex-cond-600-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -121,15 +121,15 @@
         <!-- Hero banner -->
         <div class="upload-hero">
           <div class="upload-hero-text">
-            <p class="hero-eyebrow">Live listings from PhilJobNet, OnlineJobs.ph and Adzuna</p>
+            <p class="hero-eyebrow">Live listings from PhilJobNet, OnlineJobs.ph, JSearch and Adzuna</p>
             <h1 class="hero-title">Matched on meaning, not keywords.</h1>
             <p class="hero-subtitle">Upload your resume and ResumeAid compares what your experience describes with
               live job listings, so a role can match even when it's worded differently from your resume.</p>
             <!-- Facts about how the matcher works (see backend/pipeline.py and matching_engine.py) -->
             <div class="hero-stats">
-              <div class="stat"><span class="stat-num">3</span><span class="stat-lbl">Job boards searched at once</span></div>
+              <div class="stat"><span class="stat-num">4</span><span class="stat-lbl">Job boards searched at once</span></div>
               <div class="stat-divider"></div>
-              <div class="stat"><span class="stat-num">30</span><span class="stat-lbl">Listings scored per run, max</span></div>
+              <div class="stat"><span class="stat-num">36</span><span class="stat-lbl">Listings scored per run, max</span></div>
               <div class="stat-divider"></div>
               <div class="stat"><span class="stat-num">MiniLM</span><span class="stat-lbl">Sentence-BERT model</span></div>
             </div>
@@ -261,14 +261,14 @@
               <div class="step-card">
                 <div class="step-num">02</div>
                 <h4>Analyse</h4>
-                <p>We search PhilJobNet, OnlineJobs.ph and Adzuna for roles that fit, then compare each listing's
-                  meaning with your resume using Sentence-BERT.</p>
+                <p>We search PhilJobNet, OnlineJobs.ph, JSearch and Adzuna for roles that fit, then compare each
+                  listing's meaning with your resume using Sentence-BERT.</p>
               </div>
               <div class="step-card">
                 <div class="step-num">03</div>
                 <h4>Match</h4>
-                <p>See the roles ranked by score, with a breakdown for skills, experience and job title, plus
-                  the keywords you share.</p>
+                <p>See the roles ranked by score, with a breakdown for skills, experience and job title, and filter by
+                  work setup, job type, salary or job board.</p>
               </div>
             </div>
           </div>
@@ -434,7 +434,7 @@
         <div class="view-header">
           <div>
             <h1 class="view-title">Your resume</h1>
-            <p class="view-subtitle">Parsed data from your most recent upload.</p>
+            <p class="view-subtitle">Check what we detected, fill in anything missing, then update your matches.</p>
           </div>
         </div>
 
@@ -461,56 +461,94 @@
           <button class="btn-outline" onclick="switchView('upload')">Upload a resume</button>
         </div>
 
-        <!-- Resume content -->
+        <!-- Resume content: health check (left) + editable profile (right) -->
         <div class="resume-content hidden" id="resume-content">
-          <!-- Inline Resume Check -->
-          <div class="resume-check-inline hidden" id="resume-check-inline">
-            <div class="rc-inline-header">
-              <div class="rc-inline-icon-wrap">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                  <line x1="12" y1="9" x2="12" y2="13" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
+          <div class="resume-layout">
+            <!-- Left column: resume check summary -->
+            <aside class="resume-sidebar">
+              <div class="rc-card" id="rc-card">
+                <div class="rc-card-head">
+                  <h3 class="rc-card-title">Resume check</h3>
+                  <span class="rc-score" id="rc-score">0/6</span>
+                </div>
+                <div class="rc-progress" aria-hidden="true"><div class="rc-progress-fill" id="rc-progress-fill"></div></div>
+                <p class="rc-card-sub" id="rc-card-sub">sections complete</p>
+                <ul class="rc-checklist" id="rc-checklist"></ul>
+                <div class="rc-notes hidden" id="rc-notes"></div>
+                <p class="rc-privacy">Edits are only used for matching. Your original file isn’t changed or stored.</p>
               </div>
-              <div>
-                <h3 class="rc-inline-title">Resume Check</h3>
-                <p class="rc-inline-subtitle">A few things to improve</p>
+            </aside>
+
+            <!-- Right column: editable profile -->
+            <div class="resume-main-col">
+              <div class="info-card edit-card">
+                <div class="edit-card-head">
+                  <div class="profile-avatar" id="profile-avatar">?</div>
+                  <div>
+                    <h3 class="card-section-title">Contact details</h3>
+                    <p class="edit-card-hint">Shown on your profile. Doesn’t change match scores.</p>
+                  </div>
+                </div>
+                <div class="field-grid">
+                  <label class="field" data-field="name">
+                    <span class="field-label">Full name <span class="field-status" data-status-for="name"></span></span>
+                    <input class="text-input" id="pf-name" type="text" maxlength="120" autocomplete="name" placeholder="e.g. Juan Dela Cruz" />
+                  </label>
+                  <label class="field" data-field="email">
+                    <span class="field-label">Email <span class="field-status" data-status-for="email"></span></span>
+                    <input class="text-input" id="pf-email" type="email" maxlength="200" autocomplete="email" placeholder="you@example.com" />
+                  </label>
+                  <label class="field" data-field="phone">
+                    <span class="field-label">Phone <span class="field-status" data-status-for="phone"></span></span>
+                    <input class="text-input" id="pf-phone" type="tel" maxlength="50" autocomplete="tel" placeholder="e.g. 0917 123 4567" />
+                  </label>
+                </div>
               </div>
-            </div>
-            <div class="rc-inline-issues" id="rc-inline-issues"></div>
-            <div class="rc-inline-skills-section hidden" id="rc-inline-skills-section">
-              <h4 class="rc-section-title">Suggested skills found in your text</h4>
-              <div class="chips-wrap" id="rc-inline-skills"></div>
+
+              <div class="info-card edit-card" data-field="skills">
+                <div class="edit-card-row">
+                  <h3 class="card-section-title">Skills <span class="field-status" data-status-for="skills"></span></h3>
+                  <span class="edit-count" id="skills-count"></span>
+                </div>
+                <p class="edit-card-hint">Skills drive most of the match score. Remove anything wrong and add what’s missing.</p>
+                <div class="chips-wrap skill-editor" id="resume-skills"></div>
+                <form class="skill-add" id="skill-add-form" autocomplete="off">
+                  <input class="text-input" id="skill-add-input" type="text" maxlength="80"
+                    placeholder="Add a skill, e.g. Customer service" aria-label="Add a skill" />
+                  <button class="btn-outline" type="submit">Add</button>
+                </form>
+                <p class="field-help">Tip: paste several skills separated by commas.</p>
+                <div class="skill-suggest hidden" id="skill-suggest">
+                  <div class="edit-card-row">
+                    <h4 class="rc-section-title">Found elsewhere in your resume</h4>
+                    <button class="btn-link" type="button" id="skill-suggest-all">Add all</button>
+                  </div>
+                  <div class="chips-wrap" id="skill-suggest-list"></div>
+                </div>
+              </div>
+
+              <div class="info-card edit-card" data-field="experience">
+                <h3 class="card-section-title">Experience <span class="field-status" data-status-for="experience"></span></h3>
+                <p class="edit-card-hint">Roles, responsibilities and achievements. Used for the experience score.</p>
+                <textarea class="text-input text-area" id="pf-experience" rows="8" maxlength="20000"
+                  placeholder="e.g. Customer Service Representative, ABC Corp (2022–2024) — handled 60+ calls a day…"></textarea>
+              </div>
+
+              <div class="info-card edit-card" data-field="education">
+                <h3 class="card-section-title">Education <span class="field-status" data-status-for="education"></span></h3>
+                <p class="edit-card-hint">Used when a job requires a specific degree. Roles that require a college degree won’t match unless your degree is listed here.</p>
+                <textarea class="text-input text-area" id="pf-education" rows="4" maxlength="20000"
+                  placeholder="e.g. BS Information Technology, University of the Philippines (2021)"></textarea>
+              </div>
             </div>
           </div>
 
-          <div class="resume-layout">
-            <!-- Left column: profile + skills -->
-            <div class="resume-sidebar">
-              <div class="profile-card">
-                <div class="profile-avatar" id="profile-avatar">?</div>
-                <h2 class="profile-name" id="profile-name">Unknown</h2>
-                <p class="profile-email" id="profile-email"></p>
-              </div>
-
-              <div class="info-card">
-                <h3 class="card-section-title">Detected Skills</h3>
-                <div class="chips-wrap" id="resume-skills"></div>
-              </div>
-            </div>
-
-            <!-- Right column: experience -->
-            <div class="resume-main-col">
-              <div class="info-card">
-                <h3 class="card-section-title">Experience Summary</h3>
-                <p class="experience-text" id="resume-experience">No experience information detected.</p>
-              </div>
-              <div class="info-card">
-                <h3 class="card-section-title">Education</h3>
-                <p class="experience-text" id="resume-education">No education information detected.</p>
-              </div>
+          <!-- Sticky save bar: appears once something is edited -->
+          <div class="edit-bar" id="edit-bar">
+            <p class="edit-bar-text" id="edit-bar-text">No changes yet</p>
+            <div class="edit-bar-actions">
+              <button class="btn-ghost" type="button" id="btn-reset-profile" disabled>Undo changes</button>
+              <button class="btn-primary" type="button" id="btn-update-matches" disabled>Update matches</button>
             </div>
           </div>
         </div>
@@ -685,29 +723,29 @@
         <div style="width:36px"></div>
       </div>
       <div class="overlay-body">
-        <div class="rc-badge">
+        <div class="rc-badge" id="rc-overlay-badge">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          A few things to improve
+          <span id="rc-overlay-badge-text">A few things to improve</span>
         </div>
-        <div id="rc-issues"></div>
-        <div id="rc-skills-section" class="hidden">
-          <h4 class="rc-section-title">Suggested skills found in your text</h4>
-          <div class="chips-wrap" id="rc-skills"></div>
-        </div>
+        <p class="rc-overlay-intro">Some details couldn’t be read from your file. You can fill them in now and your
+          matches will update — your file stays as it is.</p>
+        <ul class="rc-checklist" id="rc-overlay-list"></ul>
+        <div class="rc-notes hidden" id="rc-overlay-notes"></div>
       </div>
-      <div class="overlay-footer">
-        <button class="btn-primary btn-full" id="btn-continue">
-          Continue to matches
+      <div class="overlay-footer overlay-footer-stack">
+        <button class="btn-primary btn-full" id="btn-fix-resume">
+          Fix these in the editor
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="m9 18 6-6-6-6" />
           </svg>
         </button>
+        <button class="btn-ghost btn-full" id="btn-continue">Skip for now and see matches</button>
       </div>
     </div>
   </div>
@@ -864,8 +902,18 @@
       <h2 class="modal-title" id="about-modal-title">ResumeAid</h2>
       <p class="modal-version">Version 1.0</p>
       <p class="modal-tagline">Resume-to-job matching for Filipino job seekers, built by CS students. Uses
-        Sentence-BERT (all-MiniLM-L6-v2) with listings from PhilJobNet, OnlineJobs.ph and Adzuna.</p>
+        Sentence-BERT (all-MiniLM-L6-v2) with listings from PhilJobNet, OnlineJobs.ph, JSearch and Adzuna.</p>
       <button class="btn-primary" id="about-ok">Got it</button>
+    </div>
+  </div>
+
+  <!-- ─── BUSY OVERLAY (refresh listings / update matches) ─────── -->
+  <div class="refresh-overlay hidden" id="refresh-overlay" role="alertdialog" aria-modal="true" aria-live="assertive" aria-labelledby="refresh-overlay-title">
+    <div class="refresh-card">
+      <div class="refresh-spinner" aria-hidden="true"></div>
+      <p class="refresh-title" id="refresh-overlay-title">Refreshing listings…</p>
+      <p class="refresh-sub" id="refresh-overlay-sub">Fetching the latest jobs from the job boards. This can take up to a minute.</p>
+      <div class="loading-bar-track"><div class="loading-bar-fill" id="refresh-bar"></div></div>
     </div>
   </div>
 

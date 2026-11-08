@@ -5,6 +5,7 @@ Exposes the pipeline via a Flask HTTP server for client apps.
 Endpoints:
   POST /api/analyze: Takes a resume (PDF/DOCX) and optional query, country, source.
                      Returns parsed resume, health check, and matched jobs.
+  POST /api/rematch: Takes an edited profile (JSON) and re-ranks listings without a file.
   GET /api/health: Returns {"status": "ok"}.
 
 Configuration (environment variables, optionally loaded from backend/.env):
@@ -30,7 +31,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from pipeline import run_pipeline
+from pipeline import run_pipeline, run_pipeline_from_profile
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("resumeaid.api")
@@ -103,43 +104,7 @@ def analyze():
             source=source,
             force_refresh=force_refresh,
         )
-
-        parsed_resume = result["parsed_resume"]
-        resume_summary = {
-            "name": parsed_resume.get("name"),
-            "email": parsed_resume.get("email"),
-            "phone": parsed_resume.get("phone"),
-            "skills": parsed_resume.get("skills", []),
-            "education": parsed_resume.get("education"),
-            "experience": parsed_resume.get("experience"),
-        }
-
-        matches = [
-            {
-                "title": job.get("title"),
-                "company": job.get("company"),
-                "location": job.get("location"),
-                "url": job.get("url"),
-                "match_score": job.get("match_score"),
-                "relative_score": job.get("relative_score"),
-                "comment": job.get("comment"),
-                "breakdown": job.get("breakdown"),
-                # Normalized by job_attributes.enrich_job() for filtering/sorting
-                "source": job.get("source"),
-                "salary": job.get("salary"),
-                "work_mode": job.get("work_mode"),
-                "employment_type": job.get("employment_type"),
-                "posted_at": job.get("posted_at"),
-            }
-            for job in result["ranked_results"]
-        ]
-
-        return jsonify({
-            "resume_summary": resume_summary,
-            "health_check": result["health_check"],
-            "search_info": result["search_info"],
-            "matches": matches,
-        })
+        return jsonify(_build_response(result))
 
     except Exception:
         # Log full details server-side; don't leak internals to the client.
@@ -149,6 +114,80 @@ def analyze():
     finally:
         # Ensure temp file cleanup to keep API stateless
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@app.route("/api/rematch", methods=["POST"])
+def rematch():
+    """
+    Re-ranks listings from a user-edited profile (JSON) — no file upload.
+
+    Body: {"profile": {name, email, phone, skills: [...], experience, education},
+           "query": optional search query (reuse the previous one to hit the cache),
+           "country": "ph", "source": "all", "refresh": false}
+    """
+    body = request.get_json(silent=True) or {}
+    profile = body.get("profile")
+    if not isinstance(profile, dict):
+        return jsonify({"error": "Missing 'profile' object."}), 400
+    if not isinstance(profile.get("skills", []), list):
+        return jsonify({"error": "'skills' must be a list."}), 400
+
+    query = (str(body.get("query") or "")).strip()[:200] or None
+    country = (str(body.get("country") or "ph")).strip().lower()[:2]
+    source = (str(body.get("source") or "all")).strip().lower()
+    force_refresh = bool(body.get("refresh"))
+    if source not in ALLOWED_SOURCES:
+        return jsonify({"error": f"Unknown source '{source}'."}), 400
+
+    try:
+        result = run_pipeline_from_profile(
+            profile, search_query=query, country=country, source=source, force_refresh=force_refresh,
+        )
+        return jsonify(_build_response(result))
+    except Exception:
+        logger.exception("Failed to re-match edited profile")
+        return jsonify({"error": "We couldn't update your matches. Please try again."}), 500
+
+
+def _build_response(result):
+    """Shapes a pipeline result into the JSON both endpoints return."""
+    parsed_resume = result["parsed_resume"]
+    resume_summary = {
+        "name": parsed_resume.get("name"),
+        "email": parsed_resume.get("email"),
+        "phone": parsed_resume.get("phone"),
+        "skills": parsed_resume.get("skills", []),
+        "education": parsed_resume.get("education"),
+        "experience": parsed_resume.get("experience"),
+    }
+
+    matches = [
+        {
+            "title": job.get("title"),
+            "company": job.get("company"),
+            "location": job.get("location"),
+            "url": job.get("url"),
+            "match_score": job.get("match_score"),
+            "relative_score": job.get("relative_score"),
+            "comment": job.get("comment"),
+            "breakdown": job.get("breakdown"),
+            # Normalized by job_attributes.enrich_job() for filtering/sorting
+            "source": job.get("source"),
+            "salary": job.get("salary"),
+            "work_mode": job.get("work_mode"),
+            "employment_type": job.get("employment_type"),
+            "posted_at": job.get("posted_at"),
+            "required_education": job.get("required_education"),
+        }
+        for job in result["ranked_results"]
+    ]
+
+    return {
+        "resume_summary": resume_summary,
+        "health_check": result["health_check"],
+        "search_info": result["search_info"],
+        "matches": matches,
+    }
 
 
 if __name__ == "__main__":

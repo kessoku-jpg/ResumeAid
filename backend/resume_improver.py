@@ -121,6 +121,9 @@ def analyze_parsed_resume(parsed, filepath="resume"):
     suggestions = []
 
     # --- Contact info ---
+    if not parsed.get("name"):
+        issues.append("No name detected.")
+        suggestions.append("Put your full name on its own line at the very top of the resume.")
     if not parsed.get("email"):
         issues.append("No email address detected.")
         suggestions.append("Add a clear email address near the top of the resume.")
@@ -169,6 +172,43 @@ def analyze_parsed_resume(parsed, filepath="resume"):
 
     return issues, suggestions, suggested_skills
 
+
+def build_checklist(parsed):
+    """
+    Per-field status for the editable resume check in the web UI.
+
+    Each item: {field, label, status ("ok" | "warn" | "missing"), message}.
+    Mirrors the rules in analyze_parsed_resume() so the checklist and the
+    issue list never disagree.
+    """
+    explicit_skills = parsed.get("explicit_skills") or []
+    n_skills = len(explicit_skills)
+
+    def item(field, label, status, message):
+        return {"field": field, "label": label, "status": status, "message": message}
+
+    checklist = [
+        item("name", "Name", "ok" if parsed.get("name") else "missing",
+             "Detected." if parsed.get("name") else "No name detected — add it so your profile is complete."),
+        item("email", "Email", "ok" if parsed.get("email") else "missing",
+             "Detected." if parsed.get("email") else "No email detected — employers need a way to reach you."),
+        item("phone", "Phone", "ok" if parsed.get("phone") else "missing",
+             "Detected." if parsed.get("phone") else "No phone number detected."),
+    ]
+    if n_skills == 0:
+        checklist.append(item("skills", "Skills", "missing",
+                              "No Skills section detected — skills drive most of the match score."))
+    elif n_skills < 3:
+        checklist.append(item("skills", "Skills", "warn",
+                              f"Only {n_skills} skill{'s' if n_skills != 1 else ''} listed — add a few more."))
+    else:
+        checklist.append(item("skills", "Skills", "ok", f"{n_skills} skills listed."))
+    checklist.append(item("experience", "Experience", "ok" if parsed.get("experience") else "missing",
+                          "Detected." if parsed.get("experience")
+                          else "No Experience section detected — add a short summary of your work."))
+    checklist.append(item("education", "Education", "ok" if parsed.get("education") else "missing",
+                          "Detected." if parsed.get("education") else "No Education section detected."))
+    return checklist
 
 def print_report(filepath, issues, suggestions, suggested_skills):
     """Prints the full diagnostic report."""
