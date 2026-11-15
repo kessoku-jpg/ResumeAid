@@ -5,6 +5,13 @@ import sys
 
 import requests
 
+# Load backend/.env so keys are found when this file is run standalone too.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
+
 from job_attributes import ADZUNA_CURRENCY
 
 # Adzuna endpoint: /v1/api/jobs/{country}/search/{page}

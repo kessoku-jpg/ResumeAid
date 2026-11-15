@@ -15,8 +15,23 @@ uploads/
 .env*
 !.env.example
 
-# Python
+# Python & Virtual Environments
 __pycache__/
 *.py[cod]
+*$py.class
 venv/
 .venv/
+env/
+.env.venv/
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+pyrightconfig.json
+
+# Evaluation data & scripts
+evaluation/
+
+# OS files
+.DS_Store
+Thumbs.db
