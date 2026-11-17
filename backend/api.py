@@ -27,11 +27,15 @@ try:
 except ImportError:
     pass
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from pipeline import run_pipeline, run_pipeline_from_profile
+from session_logger import LOGS_DIR
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, ".."))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("resumeaid.api")
@@ -61,6 +65,33 @@ def handle_too_large(_e):
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/session-log", methods=["GET"])
+def get_latest_session_log():
+    """Returns the most recent computational session log (.txt) for inspection or download."""
+    latest_path = os.path.join(LOGS_DIR, "latest_session.txt")
+    if not os.path.exists(latest_path):
+        return jsonify({"error": "No session log has been generated yet."}), 404
+    download = request.args.get("download", "").lower() in ("1", "true", "yes")
+    return send_file(
+        latest_path,
+        mimetype="text/plain; charset=utf-8",
+        as_attachment=download,
+        download_name="resumeaid_latest_session.txt",
+    )
+
+
+@app.route("/", methods=["GET"])
+def serve_index():
+    return send_from_directory(_REPO_ROOT, "index.html")
+
+
+@app.route("/<path:filename>", methods=["GET"])
+def serve_static_files(filename):
+    if filename in ("app.js", "style.css", "index.html") or filename.startswith("fonts/"):
+        return send_from_directory(_REPO_ROOT, filename)
+    return jsonify({"error": "Not found"}), 404
 
 
 @app.route("/api/analyze", methods=["POST"])

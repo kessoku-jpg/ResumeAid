@@ -1,0 +1,12 @@
+# Vercel only needs the static frontend (index.html, app.js, style.css, fonts/)
+backend/
+onet/
+evaluation/
+logs/
+.venv/
+venv/
+.cache/
+Dockerfile
+start.bat
+README.md
+pyrightconfig.json

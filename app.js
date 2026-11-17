@@ -1,9 +1,55 @@
 // Main UI logic and API communication for ResumeAid
 'use strict';
 
-// Backend URL: override with window.RESUMEAID_API_BASE (set before app.js loads)
-// or localStorage 'ra_api'. Falls back to the local dev server.
-const API_BASE = (window.RESUMEAID_API_BASE || localStorage.getItem('ra_api') || 'http://localhost:5000').replace(/\/+$/, '');
+// Backend URL: override with ?api=https://... in the URL, window.RESUMEAID_API_BASE,
+// or localStorage 'ra_api'. On deployed domains (e.g. Cloudflare Tunnel or Vercel
+// with /api/* rewrites), defaults to same-origin (''); on local dev, uses localhost:5000.
+const _urlParams = new URLSearchParams(window.location.search);
+const _urlApiParam = _urlParams.get('api');
+if (_urlApiParam && /^https?:\/\//i.test(_urlApiParam.trim())) {
+  localStorage.setItem('ra_api', _urlApiParam.trim().replace(/\/+$/, ''));
+  // Clean ?api=... from the address bar after saving so the URL stays neat
+  _urlParams.delete('api');
+  const _cleanSearch = _urlParams.toString();
+  window.history.replaceState({}, '', window.location.pathname + (_cleanSearch ? `?${_cleanSearch}` : '') + window.location.hash);
+}
+const _isLocalDev = (
+  window.location.protocol === 'file:' ||
+  ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+    window.location.port !== '5000' && window.location.port !== '7860')
+);
+let API_BASE = (
+  _urlApiParam ||
+  window.RESUMEAID_API_BASE ||
+  localStorage.getItem('ra_api') ||
+  (_isLocalDev ? 'http://localhost:5000' : '')
+).replace(/\/+$/, '');
+
+function updateApiDisplay() {
+  const el = document.getElementById('api-server-display');
+  if (!el) return;
+  el.textContent = API_BASE ? API_BASE.replace(/^https?:\/\//i, '') : 'Same origin';
+}
+
+function promptApiServer() {
+  const current = localStorage.getItem('ra_api') || API_BASE || '';
+  const input = window.prompt(
+    'Enter your Backend / Cloudflare Tunnel URL (e.g. https://xxxx.trycloudflare.com).\nLeave blank to reset to default:',
+    current
+  );
+  if (input === null) return;
+  const cleaned = input.trim().replace(/\/+$/, '');
+  if (cleaned) {
+    localStorage.setItem('ra_api', cleaned);
+    API_BASE = cleaned;
+  } else {
+    localStorage.removeItem('ra_api');
+    API_BASE = (_isLocalDev ? 'http://localhost:5000' : '');
+  }
+  updateApiDisplay();
+  checkBackend();
+  toast(API_BASE ? `Connected to ${API_BASE}` : 'Reset to default server');
+}
 
 // Country codes understood by the backend (PH sources + Adzuna-supported markets)
 const COUNTRIES = {
@@ -151,6 +197,11 @@ function bindAll() {
   });
   $('row-country').addEventListener('click', openCountryModal);
   $('row-country').addEventListener('keydown', e => { if (e.key === 'Enter') openCountryModal(); });
+  if ($('row-api-server')) {
+    updateApiDisplay();
+    $('row-api-server').addEventListener('click', promptApiServer);
+    $('row-api-server').addEventListener('keydown', e => { if (e.key === 'Enter') promptApiServer(); });
+  }
   $('row-about').addEventListener('click', () => openModal('modal-about'));
   $('row-about').addEventListener('keydown', e => { if (e.key === 'Enter') openModal('modal-about'); });
   $('row-privacy').addEventListener('click', () => toast('Privacy policy coming soon.'));
