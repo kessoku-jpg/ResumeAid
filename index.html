@@ -839,11 +839,34 @@
                 <div class="breakdown-fill title-fill" id="bd-title-fill"></div>
               </div>
             </div>
+            <div class="breakdown-row">
+              <div class="breakdown-label-row">
+                <span class="breakdown-dim">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="5" r="2.5" />
+                    <circle cx="5" cy="19" r="2.5" />
+                    <circle cx="19" cy="19" r="2.5" />
+                    <path d="M12 7.5v4M12 11.5L6.5 17M12 11.5l5.5 5.5" />
+                  </svg>
+                  O*NET Ontology Match
+                </span>
+                <span class="breakdown-pct" id="bd-onto-pct">—</span>
+              </div>
+              <div class="breakdown-track">
+                <div class="breakdown-fill title-fill" id="bd-onto-fill"></div>
+              </div>
+            </div>
           </div>
           <!-- Matched skills chips -->
           <div id="modal-matched-skills-wrap" class="hidden">
             <p class="breakdown-skills-label">Directly matched keywords</p>
             <div class="chips-wrap" id="modal-matched-skills"></div>
+          </div>
+          <!-- Ontology links (O*NET skill tree) -->
+          <div id="modal-onto-links-wrap" class="hidden">
+            <p class="breakdown-skills-label">O*NET concept links</p>
+            <ul class="onto-links" id="modal-onto-links"></ul>
           </div>
         </div>
       </div>

@@ -989,6 +989,10 @@ body.dark{
 .skills-fill,.exp-fill,.title-fill{background:var(--accent-text)}
 
 .breakdown-skills-label{font-size:13px;font-weight:600;color:var(--txt-2);margin:18px 0 8px}
+.onto-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.onto-links li{display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.35}
+.onto-pair{color:var(--txt-1, inherit);font-weight:500}
+.onto-meta{font-size:12px;color:var(--txt-2)}
 
 /* About */
 .about-modal{text-align:center;padding:32px 28px;align-items:center}

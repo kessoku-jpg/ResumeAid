@@ -187,6 +187,7 @@ def _build_response(result):
         "health_check": result["health_check"],
         "search_info": result["search_info"],
         "matches": matches,
+        "session_log": result.get("session_log"),
     }
 
 

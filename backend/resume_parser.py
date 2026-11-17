@@ -356,11 +356,13 @@ def extract_contact_info(text):
 def parse_resume(filepath):
     """Main entry point. Parses a resume file into a structured dictionary."""
     raw_text = extract_text(filepath)
+    ocr_used = False
 
     # If almost no text came out, this is probably a scanned PDF — fall back to OCR
     if len(raw_text.strip()) < 50 and filepath.lower().endswith(".pdf"):
         print("Little/no text found — falling back to OCR...")
         raw_text = ocr_pdf(filepath)
+        ocr_used = True
 
     cleaned = clean_text(raw_text)
     sections = split_into_sections(cleaned)
@@ -387,6 +389,15 @@ def parse_resume(filepath):
         "experience": find_section(sections, "experience", "employment", "work history"),
         "detected_section_names": list(sections.keys()),
         "raw_sections": sections,
+        "_parse_meta": {
+            "filepath": filepath,
+            "file_ext": ("." + filepath.rsplit(".", 1)[-1].lower()) if "." in filepath else "",
+            "ocr_used": ocr_used,
+            "raw_char_count": len(raw_text),
+            "raw_line_count": len(raw_text.splitlines()),
+            "clean_char_count": len(cleaned),
+            "clean_line_count": len(cleaned.splitlines()),
+        },
     }
 
 

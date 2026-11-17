@@ -1,0 +1,32 @@
+# Raw O*NET SQL dump & offline builder scripts (runtime uses pre-built .json & .pt files)
+onet/
+backend/build_skill_tree_from_onet.py
+backend/build_occupation_profiles.py
+
+# Evaluation & local logs
+evaluation/
+logs/
+
+# Caches, local DBs, and virtual environments
+.cache/
+**/.cache/
+*.sqlite3
+*.db
+__pycache__/
+**/__pycache__/
+*.py[cod]
+venv/
+.venv/
+backend/.venv/
+env/
+
+# Secrets & IDE configs
+.env*
+!.env.example
+.git/
+.gitignore
+.vscode/
+.idea/
+pyrightconfig.json
+start.bat
+README.md

@@ -733,6 +733,7 @@ function showMatchDetail(match) {
     { fillId: 'bd-skills-fill', pctId: 'bd-skills-pct', value: bd?.skills_score },
     { fillId: 'bd-exp-fill', pctId: 'bd-exp-pct', value: bd?.experience_score },
     { fillId: 'bd-title-fill', pctId: 'bd-title-pct', value: bd?.title_score },
+    { fillId: 'bd-onto-fill', pctId: 'bd-onto-pct', value: bd?.ontology_score },
   ];
 
   // Reset bars first (so re-opening animates cleanly)
@@ -752,7 +753,7 @@ function showMatchDetail(match) {
           const v = value ?? 0;
           fill.style.transition = `width .7s cubic-bezier(.4,0,.2,1) ${i * 0.1}s`;
           fill.style.width = `${Math.min(100, v)}%`;
-          $(pctId).textContent = bd ? `${Math.round(v)}%` : '—';
+          $(pctId).textContent = (bd && value != null) ? `${Math.round(v)}%` : '—';
         }, i * 80);
       });
     });
@@ -775,6 +776,19 @@ function showMatchDetail(match) {
   } else {
     matchedWrap.classList.add('hidden');
   }
+
+  // Ontology links: how resume and job connect through the O*NET skill tree
+  const ontoWrap = $('modal-onto-links-wrap');
+  const ontoEl = $('modal-onto-links');
+  const links = (bd?.ontology_links ?? []).filter(l => l.similarity >= 40).slice(0, 5);
+  ontoEl.innerHTML = links.map(l => {
+    const via = l.job_concept === l.resume_concept
+      ? 'same O*NET concept'
+      : `via <strong>${esc(l.shared_concept)}</strong>`;
+    return `<li><span class="onto-pair">${esc(l.resume_concept)} <span aria-hidden="true">↔</span> ${esc(l.job_concept)}</span>`
+      + `<span class="onto-meta">${via} · ${Math.round(l.similarity)}%</span></li>`;
+  }).join('');
+  ontoWrap.classList.toggle('hidden', links.length === 0);
 
   openModal('modal-match');
 }

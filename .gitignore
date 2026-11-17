@@ -4,6 +4,9 @@
 *.sqlite3
 *.db
 
+# Session execution logs
+logs/
+
 # Uploaded resumes
 Resumes/
 uploads/
@@ -31,6 +34,9 @@ pyrightconfig.json
 
 # Evaluation data & scripts
 evaluation/
+
+# Raw O*NET SQL database dump (pre-built JSON/PT files in backend/ are used at runtime)
+onet/
 
 # OS files
 .DS_Store

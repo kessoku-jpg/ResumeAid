@@ -8,7 +8,7 @@ import sys
 from resume_parser import parse_resume, clean_text, extract_text, split_into_sections
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SKILL_TAXONOMY_PATH = os.path.join(_THIS_DIR, "skill_taxonomy.json")
+_SKILL_TREE_PATH = os.path.join(_THIS_DIR, "skill_tree.json")
 
 # Real O*NET entries are often vendor-prefixed ("Oracle Java",
 # "Microsoft Excel", "Adobe Photoshop") because O*NET tracks specific
@@ -43,19 +43,24 @@ AMBIGUOUS_BARE_WORDS = {
 
 
 def _load_skill_vocabulary():
-    """Loads O*NET skill taxonomy and creates a vocabulary set."""
+    """Loads O*NET skill tree and creates a vocabulary set for resume scanning."""
     try:
-        with open(_SKILL_TAXONOMY_PATH, encoding="utf-8") as f:
-            taxonomy = json.load(f)
+        with open(_SKILL_TREE_PATH, encoding="utf-8") as f:
+            tree = json.load(f)
     except FileNotFoundError:
         return set(), {}
 
     vocabulary = set()
     display_names = {}
 
-    for raw_key in taxonomy.keys():
+    for node in tree.get("nodes", {}).values():
+        if node.get("type") not in ("example", "element"):
+            continue
+        raw_key = node["name"].lower().strip()
+        if not raw_key:
+            continue
         vocabulary.add(raw_key)
-        display_names[raw_key] = raw_key.title()
+        display_names[raw_key] = node["name"]
 
         for vendor in KNOWN_VENDOR_PREFIXES:
             if raw_key.startswith(vendor + " "):
