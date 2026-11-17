@@ -88,7 +88,7 @@ echo   [..] Starting permanent ngrok tunnel:
 echo        https://%NGROK_DOMAIN%
 echo  =====================================================================
 echo.
-"%NGROK_EXE%" http --url=%NGROK_DOMAIN% %PORT%
+"%NGROK_EXE%" http --domain=%NGROK_DOMAIN% %PORT%
 if errorlevel 1 goto :ngrok_error
 goto :end
 
