@@ -10,7 +10,7 @@ const _isLocalDev = (
 );
 const API_BASE = (
   window.RESUMEAID_API_BASE ||
-  (_isLocalDev ? 'http://localhost:5000' : '')
+  (_isLocalDev ? 'http://localhost:5000' : 'https://undoing-eligible-canal.ngrok-free.dev')
 ).replace(/\/+$/, '');
 
 // Country codes understood by the backend (PH sources + Adzuna-supported markets)
