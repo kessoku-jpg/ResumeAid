@@ -3,5 +3,11 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": ".",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://undoing-eligible-canal.ngrok-free.dev/api/:path*"
+    }
+  ]
 }

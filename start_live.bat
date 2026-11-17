@@ -1,30 +1,31 @@
 @echo off
 setlocal EnableExtensions
-title ResumeAid Live Server (Cloudflare Tunnel)
+title ResumeAid Live Server (ngrok Static Tunnel)
 cd /d "%~dp0"
 
 echo.
 echo  ====================================================
-echo    ResumeAid - Live Public Server (Cloudflare Tunnel)
+echo    ResumeAid - Live Public Server (ngrok Tunnel)
 echo  ====================================================
 echo.
 
 set "BACKEND=%~dp0backend"
 set "VENV=%BACKEND%\.venv"
 set "PORT=5000"
+set "NGROK_DOMAIN=undoing-eligible-canal.ngrok-free.dev"
 
-rem ---------- 1. Check cloudflared ----------
-where cloudflared >nul 2>&1
+rem ---------- 1. Check ngrok ----------
+where ngrok >nul 2>&1
 if errorlevel 1 (
-    echo [..] cloudflared not found on PATH. Installing via winget...
-    winget install --id Cloudflare.cloudflared --accept-package-agreements --accept-source-agreements
+    echo [..] ngrok not found on PATH. Installing via winget...
+    winget install --id Ngrok.Ngrok --accept-package-agreements --accept-source-agreements
     if errorlevel 1 (
-        echo [ERROR] Could not install cloudflared automatically.
-        echo         Run: winget install Cloudflare.cloudflared
+        echo [ERROR] Could not install ngrok automatically.
+        echo         Run: winget install Ngrok.Ngrok
         pause
         exit /b 1
     )
-    echo [OK] cloudflared installed. If PATH is not refreshed yet, reopen this script once.
+    echo [OK] ngrok installed. If PATH is not refreshed yet, reopen this script once.
 )
 
 rem ---------- 2. Pick Python ----------
@@ -58,13 +59,9 @@ echo [WARN] Backend took longer than expected; starting tunnel anyway...
 echo.
 echo  =====================================================================
 echo   [OK] Backend is online at http://127.0.0.1:%PORT%
-echo   [..] Starting Cloudflare HTTPS Tunnel...
-echo.
-echo   HOW TO ACCESS FROM YOUR LAPTOP OR PHONE:
-echo   1. Copy the "https://xxxx.trycloudflare.com" URL printed below.
-echo   2. Open it directly on your laptop, OR open your Vercel site as:
-echo      https://YOUR-SITE.vercel.app/?api=https://xxxx.trycloudflare.com
+echo   [..] Starting permanent ngrok tunnel:
+echo        https://%NGROK_DOMAIN%
 echo  =====================================================================
 echo.
-cloudflared tunnel --url http://127.0.0.1:%PORT%
+ngrok http --url=%NGROK_DOMAIN% %PORT%
 endlocal
