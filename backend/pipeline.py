@@ -9,16 +9,12 @@ and automatically derives search queries from resume skills.
 import argparse
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from resume_parser import parse_resume
-from matching_engine import (
-    rank_jobs_for_resume,
-    infer_job_title,
-    get_engine_info,
-    _populate_trace_from_parsed_resume,
-)
-from session_logger import start_session, get_active_trace, export_session_log, end_session
+from matching_engine import rank_jobs_for_resume, infer_job_title
+from session_logger import write_session_log
 
 logger = logging.getLogger("resumeaid.pipeline")
 
@@ -31,36 +27,45 @@ try:
     from philjobnet_scraper import search_jobs as search_philjobnet
     PHILJOBNET_AVAILABLE = True
 except ImportError:
+    search_philjobnet = None
     PHILJOBNET_AVAILABLE = False
 
 try:
     from job_scraper import search_jobs as search_adzuna
     ADZUNA_AVAILABLE = True
 except ImportError:
+    search_adzuna = None
     ADZUNA_AVAILABLE = False
 
 try:
     from jsearch_scraper import search_jobs as search_jsearch
     JSEARCH_AVAILABLE = True
 except ImportError:
+    search_jsearch = None
     JSEARCH_AVAILABLE = False
 
 try:
     from onlinejobs_scraper import search_jobs as search_onlinejobs
     ONLINEJOBS_AVAILABLE = True
 except ImportError:
+    search_onlinejobs = None
     ONLINEJOBS_AVAILABLE = False
 
 try:
     from resume_improver import analyze_parsed_resume, print_report, build_checklist
     IMPROVER_AVAILABLE = True
 except ImportError:
+    analyze_parsed_resume = None
+    print_report = None
+    build_checklist = None
     IMPROVER_AVAILABLE = False
 
 try:
     from job_cache import get_cached_jobs, set_cached_jobs
     CACHE_AVAILABLE = True
 except ImportError:
+    get_cached_jobs = None
+    set_cached_jobs = None
     CACHE_AVAILABLE = False
 
 from job_attributes import enrich_job
@@ -334,7 +339,7 @@ def build_search_query_from_resume(parsed_resume, max_skills=4):
 
 def _try_fetch_philjobnet(query, max_results):
     """Fetches PhilJobNet listings, returning [] on failure."""
-    if not PHILJOBNET_AVAILABLE:
+    if not PHILJOBNET_AVAILABLE or search_philjobnet is None:
         logger.warning("philjobnet_scraper.py not found or 'beautifulsoup4' not installed — skipping PhilJobNet")
         return []
     try:
@@ -346,7 +351,7 @@ def _try_fetch_philjobnet(query, max_results):
 
 def _try_fetch_adzuna(query, country, results_per_page):
     """Fetches Adzuna API listings, returning [] on failure."""
-    if not ADZUNA_AVAILABLE:
+    if not ADZUNA_AVAILABLE or search_adzuna is None:
         logger.warning("job_scraper.py not found or 'requests' not installed — skipping Adzuna")
         return []
     try:
@@ -358,7 +363,7 @@ def _try_fetch_adzuna(query, country, results_per_page):
 
 def _try_fetch_jsearch(query, country, results_per_page):
     """Fetches JSearch (RapidAPI) listings, returning [] on failure."""
-    if not JSEARCH_AVAILABLE:
+    if not JSEARCH_AVAILABLE or search_jsearch is None:
         logger.warning("jsearch_scraper.py not found or 'requests' not installed — skipping JSearch")
         return []
     try:
@@ -370,7 +375,7 @@ def _try_fetch_jsearch(query, country, results_per_page):
 
 def _try_fetch_onlinejobs(query, max_results):
     """Fetches OnlineJobs.ph listings, returning [] on failure."""
-    if not ONLINEJOBS_AVAILABLE:
+    if not ONLINEJOBS_AVAILABLE or search_onlinejobs is None:
         logger.warning("onlinejobs_scraper.py not found or 'beautifulsoup4' not installed — skipping OnlineJobs.ph")
         return []
     try:
@@ -430,14 +435,16 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
     live_sources = []
     sources_to_scrape = []
 
-    if CACHE_AVAILABLE and not force_refresh:
+    if CACHE_AVAILABLE and get_cached_jobs is not None and not force_refresh:
         for src in requested_sources:
             cached_res = get_cached_jobs(src, search_query, country=(country if src in COUNTRY_SCOPED_SOURCES else None))
-            if cached_res and cached_res.get("jobs"):
-                cached_jobs_map[src] = cached_res["jobs"]
+            cached_jobs = cached_res.get("jobs") if cached_res else None
+            if isinstance(cached_jobs, list) and cached_jobs:
+                age_sec = float(cached_res.get("age_seconds") or 0.0) if cached_res else 0.0
+                cached_jobs_map[src] = cached_jobs
                 cached_sources.append(src)
                 logger.info("Retrieved %d cached listings for %s ('%s', age: %.1fm)",
-                            len(cached_res["jobs"]), src, search_query, cached_res["age_seconds"] / 60.0)
+                            len(cached_jobs), src, search_query, age_sec / 60.0)
             else:
                 sources_to_scrape.append(src)
     else:
@@ -465,16 +472,17 @@ def get_job_listings(search_query=None, country=DEFAULT_COUNTRY, source="all", r
                 if scraped_jobs:
                     live_sources.append(src)
                     cached_jobs_map[src] = scraped_jobs
-                    if CACHE_AVAILABLE:
+                    if CACHE_AVAILABLE and set_cached_jobs is not None:
                         set_cached_jobs(src, search_query, scraped_jobs, country=(country if src in COUNTRY_SCOPED_SOURCES else None))
                 else:
                     # Fallback to stale cached data if live scrape returned nothing
-                    if CACHE_AVAILABLE:
+                    if CACHE_AVAILABLE and get_cached_jobs is not None:
                         stale_res = get_cached_jobs(src, search_query, country=(country if src in COUNTRY_SCOPED_SOURCES else None), allow_stale=True)
-                        if stale_res and stale_res.get("jobs"):
+                        stale_jobs = stale_res.get("jobs") if stale_res else None
+                        if isinstance(stale_jobs, list) and stale_jobs:
                             logger.warning("Using stale cache (%d jobs) for '%s' after live scrape returned empty",
-                                           len(stale_res["jobs"]), src)
-                            cached_jobs_map[src] = stale_res["jobs"]
+                                           len(stale_jobs), src)
+                            cached_jobs_map[src] = stale_jobs
                             cached_sources.append(src)
 
     all_jobs = []
@@ -509,55 +517,37 @@ def run_pipeline(resume_filepath, job_listings=None, search_query=None, country=
     Automatically derives a search query if none is provided.
     Supports force_refresh to bypass the job cache when requested.
     """
-    trace = start_session("file_upload (run_pipeline)", {
-        "Input File": resume_filepath,
-        "Search Query": search_query or "(auto-infer)",
-        "Country": country,
-        "Source": source,
-        "Force Refresh": force_refresh,
-    })
-    try:
-        logger.info("Parsing resume")
-        parsed_resume = parse_resume(resume_filepath)
-        _populate_trace_from_parsed_resume(trace, parsed_resume, source_type="file_upload")
-        trace.mark_stage("stage1_resume_parsing")
+    t0 = time.perf_counter()
+    logger.info("Parsing resume")
+    parsed_resume = parse_resume(resume_filepath)
 
-        # Don't log name/email/phone — resumes contain personal data.
-        logger.info("Detected %d skill(s)", len(parsed_resume.get("skills") or []))
+    # Don't log name/email/phone — resumes contain personal data.
+    logger.info("Detected %d skill(s)", len(parsed_resume.get("skills") or []))
 
-        # Run diagnostics and temporarily apply suggested skills for matching
-        health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
-        auto_applied = False
-        if IMPROVER_AVAILABLE:
-            issues, suggestions, suggested_skills = analyze_parsed_resume(parsed_resume, resume_filepath)
-            # Checklist reflects what was actually in the file (before auto-applied skills)
-            health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": suggested_skills,
-                            "checklist": build_checklist(parsed_resume)}
-            print()
-            print_report(resume_filepath, issues, suggestions, suggested_skills)
+    # Run diagnostics and temporarily apply suggested skills for matching
+    health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
+    if IMPROVER_AVAILABLE and analyze_parsed_resume is not None and build_checklist is not None and print_report is not None:
+        issues, suggestions, suggested_skills = analyze_parsed_resume(parsed_resume, resume_filepath)
+        # Checklist reflects what was actually in the file (before auto-applied skills)
+        health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": suggested_skills,
+                        "checklist": build_checklist(parsed_resume)}
+        print()
+        print_report(resume_filepath, issues, suggestions, suggested_skills)
 
-            if not parsed_resume.get("explicit_skills") and suggested_skills:
-                parsed_resume["explicit_skills"] = suggested_skills
-                auto_applied = True
-                # Keep the display "skills" list consistent too, without duplicating
-                existing_lower = {s.lower() for s in parsed_resume.get("skills", [])}
-                for skill in suggested_skills:
-                    if skill.lower() not in existing_lower:
-                        parsed_resume.setdefault("skills", []).append(skill)
-                logger.info("Auto-applied %d suggested skill(s) for this matching run "
-                            "(the resume file itself is unchanged).", len(suggested_skills))
+        if not parsed_resume.get("explicit_skills") and suggested_skills:
+            parsed_resume["explicit_skills"] = suggested_skills
+            # Keep the display "skills" list consistent too, without duplicating
+            existing_lower = {s.lower() for s in parsed_resume.get("skills", [])}
+            for skill in suggested_skills:
+                if skill.lower() not in existing_lower:
+                    parsed_resume.setdefault("skills", []).append(skill)
+            logger.info("Auto-applied %d suggested skill(s) for this matching run "
+                        "(the resume file itself is unchanged).", len(suggested_skills))
 
-        trace.diagnostics = {
-            "issues": health_check["issues"],
-            "suggestions": health_check["suggestions"],
-            "suggested_skills": health_check["suggested_skills"],
-            "auto_applied": auto_applied,
-        }
-        trace.mark_stage("stage2_resume_diagnostics")
-
-        return _search_and_rank(parsed_resume, health_check, job_listings, search_query, country, source, force_refresh)
-    finally:
-        end_session()
+    return _search_and_rank(
+        parsed_resume, health_check, job_listings, search_query, country, source, force_refresh,
+        mode="file_upload", start_time=t0,
+    )
 
 
 def _clean_text(value, max_len):
@@ -608,38 +598,25 @@ def run_pipeline_from_profile(profile, search_query=None, country=DEFAULT_COUNTR
     Re-runs matching from an edited profile instead of a file: no parsing,
     and the job cache makes it near-instant when the search query is unchanged.
     """
-    trace = start_session("profile_rematch (run_pipeline_from_profile)", {
-        "Search Query": search_query or "(auto-infer)",
-        "Country": country,
-        "Source": source,
-        "Force Refresh": force_refresh,
-    })
-    try:
-        parsed_resume = profile_to_parsed_resume(profile)
-        _populate_trace_from_parsed_resume(trace, parsed_resume, source_type="edited_profile_json")
-        trace.mark_stage("stage1_profile_normalization")
-        health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
-        if IMPROVER_AVAILABLE:
-            # No file path: skips the raw-text checks (suggested skills, word count)
-            issues, suggestions, _ = analyze_parsed_resume(parsed_resume, "")
-            health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": [],
-                            "checklist": build_checklist(parsed_resume)}
-        trace.diagnostics = {
-            "issues": health_check["issues"],
-            "suggestions": health_check["suggestions"],
-            "suggested_skills": [],
-            "auto_applied": False,
-        }
-        trace.mark_stage("stage2_resume_diagnostics")
-        return _search_and_rank(parsed_resume, health_check, None, search_query, country, source, force_refresh)
-    finally:
-        end_session()
+    t0 = time.perf_counter()
+    parsed_resume = profile_to_parsed_resume(profile)
+    health_check = {"issues": [], "suggestions": [], "suggested_skills": [], "checklist": []}
+    if IMPROVER_AVAILABLE and analyze_parsed_resume is not None and build_checklist is not None:
+        # No file path: skips the raw-text checks (suggested skills, word count)
+        issues, suggestions, _ = analyze_parsed_resume(parsed_resume, "")
+        health_check = {"issues": issues, "suggestions": suggestions, "suggested_skills": [],
+                        "checklist": build_checklist(parsed_resume)}
+    return _search_and_rank(
+        parsed_resume, health_check, None, search_query, country, source, force_refresh,
+        mode="profile_rematch", start_time=t0,
+    )
 
 
-def _search_and_rank(parsed_resume, health_check, job_listings, search_query, country, source, force_refresh):
+def _search_and_rank(parsed_resume, health_check, job_listings, search_query, country, source, force_refresh,
+                     mode="pipeline", start_time=None):
     """Shared tail of both pipelines: pick a query, fetch listings, rank them."""
-    trace = get_active_trace()
-    search_info = {
+    t0 = start_time if start_time is not None else time.perf_counter()
+    search_info: dict[str, object] = {
         "query": search_query,
         "confidence": None,
         "source": source,
@@ -659,24 +636,14 @@ def _search_and_rank(parsed_resume, health_check, job_listings, search_query, co
                 logger.info('Auto-detected search query from skills: "%s"', query)
             else:
                 logger.info("No usable skills detected to build a search query from")
-            if trace is not None:
-                trace.occupation_inference.update({
-                    "mode": "semantic_occupation_inference" if confidence is not None else "top_skills_fallback",
-                    "selected_query": query,
-                    "confidence": round(confidence, 4) if confidence is not None else None,
-                })
-                trace.mark_stage("stage3_occupation_inference")
-        else:
-            if trace is not None:
-                trace.occupation_inference.update({
-                    "mode": "user_provided_query",
-                    "selected_query": query,
-                    "confidence": None,
-                })
 
-        fetched_jobs, cache_meta = get_job_listings(
+        listings_res = get_job_listings(
             query, country=country, source=source, force_refresh=force_refresh, return_meta=True
         )
+        if isinstance(listings_res, tuple):
+            fetched_jobs, cache_meta = listings_res
+        else:
+            fetched_jobs, cache_meta = listings_res, {}
         job_listings = fetched_jobs if isinstance(fetched_jobs, list) else SAMPLE_JOB_LISTINGS
         meta_dict = cache_meta if isinstance(cache_meta, dict) else {}
         search_info = {
@@ -688,36 +655,29 @@ def _search_and_rank(parsed_resume, health_check, job_listings, search_query, co
             "cached_sources": meta_dict.get("cached_sources", []),
             "live_sources": meta_dict.get("live_sources", []),
         }
-        if trace is not None:
-            trace.mark_stage("stage4_job_retrieval")
 
     # Normalize salary / work setup / job type / posting date for filtering.
     # Done after the cache so older cached entries get the same fields.
     default_source = "sample" if search_info["is_placeholder"] else None
     job_listings = [enrich_job(job, default_source=default_source) for job in job_listings]
 
-    if trace is not None:
-        trace.job_retrieval = {
-            "source": source,
-            "cached_sources": search_info["cached_sources"],
-            "live_sources": search_info["live_sources"],
-            "is_placeholder": search_info["is_placeholder"],
-            "job_count": len(job_listings),
-        }
-
     logger.info("Matching against %d job listings...", len(job_listings))
     ranked_results = rank_jobs_for_resume(parsed_resume, job_listings)
-    if trace is not None:
-        trace.mark_stage("stage5_semantic_and_ontology_ranking")
 
     for job in ranked_results:
         logger.info("%s%% raw / %s%% relative — %s%s", job['match_score'], job['relative_score'],
                     job.get('title', 'Untitled listing'),
                     f" at {job['company']}" if job.get('company') else '')
 
-    log_path = None
-    if trace is not None:
-        log_path = export_session_log(trace, get_engine_info())
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    log_path = write_session_log(
+        parsed_resume=parsed_resume,
+        health_check=health_check,
+        search_info=search_info,
+        ranked_results=ranked_results,
+        mode=mode,
+        elapsed_ms=elapsed_ms,
+    )
 
     return {
         "parsed_resume": parsed_resume,

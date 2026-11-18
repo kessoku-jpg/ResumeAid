@@ -16,30 +16,6 @@ import re
 
 from sentence_transformers import SentenceTransformer, util
 
-try:
-    from session_logger import (
-        get_active_trace,
-        start_session,
-        export_session_log,
-        end_session,
-        _vec_preview,
-    )
-except ImportError:
-    def get_active_trace():
-        return None
-
-    def start_session(mode, metadata=None):
-        return None
-
-    def export_session_log(trace, engine_info):
-        return None
-
-    def end_session():
-        pass
-
-    def _vec_preview(tensor, n=6):
-        return "None"
-
 
 # =======================================================================
 # MODEL — loaded once at import time (loading it repeatedly is slow).
@@ -266,45 +242,14 @@ def expand_skills_with_categories(skills):
 
     implied = _expand_with_skill_tree(skills_lower) if SKILL_TREE_NODES else set()
 
-    fallback_hits = []
     for category, related_terms in FALLBACK_SKILL_TAXONOMY.items():
         if category in implied:
             continue
         if any(term in skills_lower for term in related_terms):
             implied.add(category)
-            fallback_hits.append(category)
 
     implied -= skills_lower  # don't duplicate skills already listed
-    implied_sorted = sorted(implied)
-    expanded = list(skills) + implied_sorted
-
-    trace = get_active_trace()
-    if trace is not None and not trace.skill_expansion:
-        mappings_log = {}
-        if SKILL_TREE_NODES and skills_lower:
-            raw_map = map_skills_to_tree(sorted(skills_lower))
-            for sk, hits in raw_map.items():
-                mappings_log[sk] = [
-                    {
-                        "node_id": nid,
-                        "node_name": SKILL_TREE_NODES[nid]["name"],
-                        "node_type": SKILL_TREE_NODES[nid]["type"],
-                        "depth": SKILL_TREE_NODES[nid].get("depth", 0),
-                        "score": sc,
-                        "how": how,
-                        "ancestor_path": get_skill_tree_path(nid),
-                    }
-                    for nid, sc, how in hits
-                ]
-        trace.skill_expansion = {
-            "input_skills": list(skills),
-            "mappings": mappings_log,
-            "fallback_hits": fallback_hits,
-            "implied_categories": implied_sorted,
-            "expanded_skills": expanded,
-        }
-
-    return expanded
+    return list(skills) + sorted(implied)
 
 
 # =======================================================================
@@ -368,14 +313,9 @@ def _build_occupation_title_index():
 _OCCUPATION_TITLE_ENTRIES, _OCCUPATION_TITLE_EMBEDDINGS = _build_occupation_title_index()
 
 
-_LAST_OCCUPATION_TRACE = {}
-
-
 def find_best_occupation(job_title):
     """Returns the best matching O*NET occupation for a job title, or None."""
-    global _LAST_OCCUPATION_TRACE
     if not job_title or _OCCUPATION_TITLE_EMBEDDINGS is None:
-        _LAST_OCCUPATION_TRACE = {"matched": False, "job_title": job_title}
         return None
 
     query_embedding = model.encode(job_title, convert_to_tensor=True)
@@ -383,28 +323,11 @@ def find_best_occupation(job_title):
 
     best_idx = int(similarities.argmax())
     best_score = similarities[best_idx].item()
-    title_text, soc_code = _OCCUPATION_TITLE_ENTRIES[best_idx]
     if best_score < OCCUPATION_MATCH_THRESHOLD:
-        _LAST_OCCUPATION_TRACE = {
-            "matched": False,
-            "job_title": job_title,
-            "best_candidate_title": title_text,
-            "best_soc_code": soc_code,
-            "best_score": round(best_score, 4),
-        }
         return None
 
-    profile = OCCUPATION_PROFILES[soc_code]
-    _LAST_OCCUPATION_TRACE = {
-        "matched": True,
-        "job_title": job_title,
-        "matched_title": title_text,
-        "soc_code": soc_code,
-        "occupation_title": profile.get("title", ""),
-        "score": round(best_score, 4),
-        "top_elements": profile.get("top_elements", []),
-    }
-    return soc_code, profile, best_score
+    _title_text, soc_code = _OCCUPATION_TITLE_ENTRIES[best_idx]
+    return soc_code, OCCUPATION_PROFILES[soc_code], best_score
 
 
 # =======================================================================
@@ -463,41 +386,34 @@ def _build_occupation_profile_text_index():
 _OCCUPATION_PROFILE_SOC_CODES, _OCCUPATION_PROFILE_TEXT_EMBEDDINGS = _build_occupation_profile_text_index()
 
 
-def infer_job_title(parsed_resume):
-    """Infers the most likely job title to search for based on resume content."""
+def rank_occupations_for_resume(parsed_resume, k=5):
+    """Top-k O*NET occupations for a resume as [(soc_code, title, cosine_score)]."""
     if _OCCUPATION_PROFILE_TEXT_EMBEDDINGS is None:
-        return None
+        return []
 
     resume_segments = build_resume_segments(parsed_resume)
     if not resume_segments:
-        return None
+        return []
 
-    query_text = ". ".join(resume_segments)
-
-    query_embedding = model.encode(query_text, convert_to_tensor=True)
+    query_embedding = model.encode(". ".join(resume_segments), convert_to_tensor=True)
     similarities = util.cos_sim(query_embedding, _OCCUPATION_PROFILE_TEXT_EMBEDDINGS)[0]
+    top_vals, top_idxs = similarities.topk(min(k, len(_OCCUPATION_PROFILE_SOC_CODES)))
+    ranked = []
+    for val, idx in zip(top_vals.tolist(), top_idxs.tolist()):
+        soc_code = _OCCUPATION_PROFILE_SOC_CODES[int(idx)]
+        ranked.append((soc_code, OCCUPATION_PROFILES[soc_code]["title"], float(val)))
+    return ranked
 
-    best_idx = int(similarities.argmax())
-    best_score = similarities[best_idx].item()
 
-    trace = get_active_trace()
-    if trace is not None:
-        top_k = min(5, len(_OCCUPATION_PROFILE_SOC_CODES))
-        top_vals, top_idxs = similarities.topk(top_k)
-        trace.occupation_inference["top_candidates"] = [
-            {
-                "soc_code": _OCCUPATION_PROFILE_SOC_CODES[int(idx)],
-                "title": OCCUPATION_PROFILES[_OCCUPATION_PROFILE_SOC_CODES[int(idx)]]["title"],
-                "score": round(float(val), 4),
-            }
-            for val, idx in zip(top_vals.tolist(), top_idxs.tolist())
-        ]
-
+def infer_job_title(parsed_resume):
+    """Infers the most likely job title to search for based on resume content."""
+    ranked = rank_occupations_for_resume(parsed_resume, k=1)
+    if not ranked:
+        return None
+    _soc_code, title, best_score = ranked[0]
     if best_score < JOB_TITLE_INFERENCE_THRESHOLD:
         return None
-
-    soc_code = _OCCUPATION_PROFILE_SOC_CODES[best_idx]
-    return OCCUPATION_PROFILES[soc_code]["title"], best_score
+    return title, best_score
 
 
 def expand_job_description_with_occupation(job_title, job_description):
@@ -796,35 +712,6 @@ def precompute_resume_embeddings(parsed_resume):
         resume_text = ". ".join(resume_segments)
         resume_text_emb = model.encode(resume_text, convert_to_tensor=True)
 
-    ontology_concepts = extract_resume_concepts(parsed_resume)
-
-    trace = get_active_trace()
-    if trace is not None:
-        trace.resume_encoding = {
-            "edu_level": edu_level,
-            "edu_label": edu_label,
-            "resume_segments": list(resume_segments),
-            "edu_segments": list(edu_segments),
-            "segment_embeddings_info": _vec_preview(segment_embeddings),
-            "segment_embeddings_with_edu_info": _vec_preview(segment_embeddings_with_edu),
-            "skills_emb_info": _vec_preview(skills_emb),
-            "exp_emb_info": _vec_preview(exp_emb),
-            "resume_text_emb_info": _vec_preview(resume_text_emb),
-            "ontology_concepts": [
-                {
-                    "node_id": nid,
-                    "name": SKILL_TREE_NODES[nid]["name"],
-                    "type": SKILL_TREE_NODES[nid]["type"],
-                    "depth": _ontology_depth(nid),
-                    "weight": info["weight"],
-                    "how": info["how"],
-                    "evidence": info["evidence"],
-                }
-                for nid, info in ontology_concepts.items()
-                if nid in SKILL_TREE_NODES
-            ],
-        }
-
     return {
         "resume_segments": resume_segments,
         "segment_embeddings": segment_embeddings,
@@ -837,7 +724,7 @@ def precompute_resume_embeddings(parsed_resume):
         "experience": experience,
         "exp_emb": exp_emb,
         "resume_text_emb": resume_text_emb,
-        "ontology_concepts": ontology_concepts,
+        "ontology_concepts": extract_resume_concepts(parsed_resume),
     }
 
 
@@ -852,19 +739,14 @@ def _get_requirement_embeddings(requirements):
     return requirement_embeddings
 
 
-_LAST_SEMANTIC_TRACE = {}
-
-
 def compute_semantic_match_score(resume_segments, job_description, return_details=False,
                                  precomputed_segment_embeddings=None):
     """
     Computes semantic match score using Sentence-BERT embeddings.
     Accepts precomputed_segment_embeddings to avoid re-encoding resume segments.
     """
-    global _LAST_SEMANTIC_TRACE
     requirements = split_into_requirements(job_description)
     if not requirements or (not resume_segments and precomputed_segment_embeddings is None):
-        _LAST_SEMANTIC_TRACE = {"num_segments": len(resume_segments or []), "requirements": [], "mean_cos": 0.0, "peak_cos": 0.0}
         return (0.0, []) if return_details else 0.0
 
     requirement_embeddings = _get_requirement_embeddings(requirements)
@@ -884,35 +766,17 @@ def compute_semantic_match_score(resume_segments, job_description, return_detail
 
     percentage = round(max(0, min(100, blended_score * 100)), 1)
 
-    details = []
-    req_trace = []
-    for i, requirement in enumerate(requirements):
-        segment_idx = int(best_segment_idx_per_requirement[i].item())
-        raw_cos = float(best_per_requirement[i].item())
-        best_seg = resume_segments[segment_idx] if resume_segments and segment_idx < len(resume_segments) else ""
-        sc = round(raw_cos * 100, 1)
-        details.append({
-            "requirement": requirement,
-            "best_segment": best_seg,
-            "score": sc,
-        })
-        req_trace.append({
-            "requirement": requirement,
-            "best_segment_idx": segment_idx,
-            "best_segment": best_seg,
-            "raw_cos": raw_cos,
-            "score": sc,
-        })
-
-    _LAST_SEMANTIC_TRACE = {
-        "num_segments": len(resume_segments or []),
-        "requirements": req_trace,
-        "mean_cos": average_score,
-        "peak_cos": peak_score,
-    }
-
     if not return_details:
         return percentage
+
+    details = []
+    for i, requirement in enumerate(requirements):
+        segment_idx = int(best_segment_idx_per_requirement[i].item())
+        details.append({
+            "requirement": requirement,
+            "best_segment": resume_segments[segment_idx] if resume_segments and segment_idx < len(resume_segments) else "",
+            "score": round(best_per_requirement[i].item() * 100, 1),
+        })
     return percentage, details
 
 
@@ -1190,9 +1054,6 @@ def _relation_label(job_node, resume_node, lca):
     return "related through a shared category"
 
 
-_LAST_ONTOLOGY_TRACE = {}
-
-
 def compute_ontology_score(resume_concepts, job_concepts):
     """
     Ontology-guided score (0-100): for each job concept, the best Wu-Palmer
@@ -1202,71 +1063,37 @@ def compute_ontology_score(resume_concepts, job_concepts):
     Confidence = how much concept weight the job's own text produced,
     relative to ONTOLOGY_FULL_CONFIDENCE_WEIGHT.
     """
-    global _LAST_ONTOLOGY_TRACE
     if not job_concepts or not resume_concepts:
-        _LAST_ONTOLOGY_TRACE = {"job_concepts": [], "total_weight": 0.0, "weighted_sum": 0.0, "own_text_weight": 0.0}
         return None, [], 0.0
 
     total_weight, weighted_sum, links = 0.0, 0.0, []
     own_text_weight = 0.0
-    job_concept_traces = []
     for job_node, job_info in job_concepts.items():
         if job_info["how"] != "occupation":
             own_text_weight += job_info["weight"]
-        best_sim, best_raw_wup, best_resume, best_lca = 0.0, 0.0, None, None
+        best_sim, best_resume, best_lca = 0.0, None, None
         for resume_node, resume_info in resume_concepts.items():
-            raw_wup, lca = wu_palmer_similarity(job_node, resume_node)
-            sim = raw_wup * resume_info["weight"]
+            sim, lca = wu_palmer_similarity(job_node, resume_node)
+            sim *= resume_info["weight"]
             if sim > best_sim:
-                best_sim, best_raw_wup, best_resume, best_lca = sim, raw_wup, resume_node, lca
+                best_sim, best_resume, best_lca = sim, resume_node, lca
         total_weight += job_info["weight"]
         weighted_sum += job_info["weight"] * best_sim
-        jc_entry = {
-            "job_node_id": job_node,
-            "job_concept": SKILL_TREE_NODES[job_node]["name"],
-            "job_type": SKILL_TREE_NODES[job_node]["type"],
-            "job_depth": _ontology_depth(job_node),
-            "job_weight": job_info["weight"],
-            "job_how": job_info["how"],
-            "job_evidence": job_info["evidence"],
-            "best_resume_node_id": best_resume,
-        }
         if best_resume is not None and best_lca is not None:
-            rel = _relation_label(job_node, best_resume, best_lca)
-            jc_entry.update({
-                "best_resume_concept": SKILL_TREE_NODES[best_resume]["name"],
-                "resume_depth": _ontology_depth(best_resume),
-                "resume_weight": resume_concepts[best_resume]["weight"],
-                "resume_evidence": resume_concepts[best_resume]["evidence"],
-                "lca_node_id": best_lca,
-                "lca_concept": SKILL_TREE_NODES[best_lca]["name"],
-                "lca_depth": _ontology_depth(best_lca),
-                "relation": rel,
-                "raw_wup": best_raw_wup,
-                "weighted_sim": best_sim,
-                "contribution": job_info["weight"] * best_sim,
-            })
             links.append({
                 "job_concept": SKILL_TREE_NODES[job_node]["name"],
                 "resume_concept": SKILL_TREE_NODES[best_resume]["name"],
                 "shared_concept": SKILL_TREE_NODES[best_lca]["name"],
-                "relation": rel,
+                "relation": _relation_label(job_node, best_resume, best_lca),
                 "similarity": round(best_sim * 100, 1),
                 "job_evidence": job_info["evidence"],
                 "resume_evidence": resume_concepts[best_resume]["evidence"],
                 "_rank": job_info["weight"] * best_sim,
             })
-        job_concept_traces.append(jc_entry)
 
     links.sort(key=lambda link: float(link.pop("_rank")), reverse=True)
     score = round(weighted_sum / total_weight * 100, 1) if total_weight else None
     confidence = round(min(1.0, own_text_weight / ONTOLOGY_FULL_CONFIDENCE_WEIGHT), 2)
-    _LAST_ONTOLOGY_TRACE = {
-        "job_concepts": job_concept_traces,
-        "total_weight": total_weight,
-        "weighted_sum": weighted_sum,
-        "own_text_weight": own_text_weight,
-    }
     return score, links[:ONTOLOGY_MAX_LINKS], confidence
 
 
@@ -1317,16 +1144,12 @@ def generate_match_comment(score, resume_skills, job_description):
     return band_comment + skills_note, matched_skills
 
 
-_LAST_BREAKDOWN_COS = {"skills": 0.0, "exp": 0.0, "title": 0.0}
-
-
 def compute_breakdown_scores(parsed_resume, job_description, job_title=None,
                              precomputed_resume=None, precomputed_jd_emb=None) -> dict[str, object]:
     """
     Computes individual similarity scores for skills, experience, and title.
     Reuses pre-computed resume and job embeddings to eliminate redundant encodes.
     """
-    global _LAST_BREAKDOWN_COS
     if precomputed_resume:
         skills = precomputed_resume.get("skills") or []
         experience = precomputed_resume.get("experience") or ""
@@ -1349,49 +1172,38 @@ def compute_breakdown_scores(parsed_resume, job_description, job_title=None,
             if len(_JD_EMBEDDINGS_CACHE) < 2000:
                 _JD_EMBEDDINGS_CACHE[job_description] = jd_emb
 
-    raw_skills_cos = 0.0
     # Skills score
     if precomputed_resume and precomputed_resume.get("skills_emb") is not None:
-        raw_skills_cos = float(util.cos_sim(precomputed_resume["skills_emb"], jd_emb).item())
-        skills_score = round(max(0, min(100, raw_skills_cos * 100)), 1)
+        skills_score = round(max(0, min(100, util.cos_sim(precomputed_resume["skills_emb"], jd_emb).item() * 100)), 1)
     elif skills:
         expanded = expand_skills_with_categories(skills)
         skills_text = ", ".join(expanded)
         skills_emb = model.encode(skills_text, convert_to_tensor=True)
-        raw_skills_cos = float(util.cos_sim(skills_emb, jd_emb).item())
-        skills_score = round(max(0, min(100, raw_skills_cos * 100)), 1)
+        skills_score = round(max(0, min(100, util.cos_sim(skills_emb, jd_emb).item() * 100)), 1)
     else:
         skills_score = 0.0
 
-    raw_exp_cos = 0.0
     # Experience score — reusing the SAME jd_emb!
     if precomputed_resume and precomputed_resume.get("exp_emb") is not None:
-        raw_exp_cos = float(util.cos_sim(precomputed_resume["exp_emb"], jd_emb).item())
-        experience_score = round(max(0, min(100, raw_exp_cos * 100)), 1)
+        experience_score = round(max(0, min(100, util.cos_sim(precomputed_resume["exp_emb"], jd_emb).item() * 100)), 1)
     elif experience:
         exp_emb = model.encode(experience, convert_to_tensor=True)
-        raw_exp_cos = float(util.cos_sim(exp_emb, jd_emb).item())
-        experience_score = round(max(0, min(100, raw_exp_cos * 100)), 1)
+        experience_score = round(max(0, min(100, util.cos_sim(exp_emb, jd_emb).item() * 100)), 1)
     else:
         experience_score = 0.0
 
-    raw_title_cos = 0.0
     # Title score
     title_score = 0.0
     if job_title:
         title_emb = model.encode(job_title, convert_to_tensor=True)
         if precomputed_resume and precomputed_resume.get("resume_text_emb") is not None:
-            raw_title_cos = float(util.cos_sim(precomputed_resume["resume_text_emb"], title_emb).item())
-            title_score = round(max(0, min(100, raw_title_cos * 100)), 1)
+            title_score = round(max(0, min(100, util.cos_sim(precomputed_resume["resume_text_emb"], title_emb).item() * 100)), 1)
         else:
             resume_segments = build_resume_segments(parsed_resume)
             if resume_segments:
                 resume_text = ". ".join(resume_segments)
                 resume_emb = model.encode(resume_text, convert_to_tensor=True)
-                raw_title_cos = float(util.cos_sim(resume_emb, title_emb).item())
-                title_score = round(max(0, min(100, raw_title_cos * 100)), 1)
-
-    _LAST_BREAKDOWN_COS = {"skills": raw_skills_cos, "exp": raw_exp_cos, "title": raw_title_cos}
+                title_score = round(max(0, min(100, util.cos_sim(resume_emb, title_emb).item() * 100)), 1)
 
     return {
         "skills_score": skills_score,
@@ -1401,170 +1213,58 @@ def compute_breakdown_scores(parsed_resume, job_description, job_title=None,
     }
 
 
-def get_engine_info() -> dict[str, object]:
-    """Returns computational model, ontology, and hyperparameter metadata for session logs."""
-    embedded_count = (
-        len(_SKILL_TREE_NODE_IDS)
-        if _SKILL_TREE_NODE_IDS is not None
-        else sum(1 for n in SKILL_TREE_NODES.values() if n.get("depth", 0) >= _SKILL_TREE_SEMANTIC_MIN_DEPTH)
-    )
-    return {
-        "model_name": MODEL_NAME,
-        "embedding_dim": 384,
-        "tree_node_count": len(SKILL_TREE_NODES),
-        "tree_alias_count": len(SKILL_TREE_INDEX),
-        "tree_embedded_count": embedded_count,
-        "occupation_count": len(OCCUPATION_PROFILES),
-        "occupation_title_count": len(_OCCUPATION_TITLE_ENTRIES),
-        "hyperparameters": {
-            "OCCUPATION_MATCH_THRESHOLD": OCCUPATION_MATCH_THRESHOLD,
-            "JOB_TITLE_INFERENCE_THRESHOLD": JOB_TITLE_INFERENCE_THRESHOLD,
-            "SKILL_TREE_SEMANTIC_THRESHOLD": SKILL_TREE_SEMANTIC_THRESHOLD,
-            "SKILL_TREE_SEMANTIC_EXAMPLE_THRESHOLD": SKILL_TREE_SEMANTIC_EXAMPLE_THRESHOLD,
-            "SKILL_TREE_SEMANTIC_TOP_K": SKILL_TREE_SEMANTIC_TOP_K,
-            "ONTOLOGY_WEIGHT": ONTOLOGY_WEIGHT,
-            "ONTOLOGY_CONCEPT_THRESHOLD": ONTOLOGY_CONCEPT_THRESHOLD,
-            "ONTOLOGY_CONCEPT_TOP_K": ONTOLOGY_CONCEPT_TOP_K,
-            "ONTOLOGY_MIN_LCA_DEPTH": ONTOLOGY_MIN_LCA_DEPTH,
-            "ONTOLOGY_ENRICHMENT_WEIGHT": ONTOLOGY_ENRICHMENT_WEIGHT,
-            "ONTOLOGY_FULL_CONFIDENCE_WEIGHT": ONTOLOGY_FULL_CONFIDENCE_WEIGHT,
-        },
-    }
-
-
-def _populate_trace_from_parsed_resume(trace, parsed_resume, source_type="parsed_resume_dict"):
-    """Fills Stage 1 parsing telemetry on trace if it was not already populated by pipeline.py."""
-    if trace is None or trace.parsing:
-        return
-    meta = parsed_resume.get("_parse_meta") or {}
-    raw_sections = parsed_resume.get("raw_sections") or {}
-    sections_summary = {
-        k: {"chars": len(v or ""), "lines": len((v or "").splitlines())}
-        for k, v in raw_sections.items()
-    }
-    trace.parsing = {
-        "source_type": "file_upload" if meta.get("filepath") else source_type,
-        "filepath": meta.get("filepath"),
-        "file_ext": meta.get("file_ext", ""),
-        "ocr_used": meta.get("ocr_used", False),
-        "raw_char_count": meta.get("raw_char_count", 0),
-        "raw_line_count": meta.get("raw_line_count", 0),
-        "clean_char_count": meta.get("clean_char_count", 0),
-        "clean_line_count": meta.get("clean_line_count", 0),
-        "sections": sections_summary,
-        "name": parsed_resume.get("name"),
-        "email": parsed_resume.get("email"),
-        "phone": parsed_resume.get("phone"),
-        "orgs": parsed_resume.get("organizations_mentioned", []),
-        "dates": parsed_resume.get("dates_mentioned", []),
-        "explicit_skills": parsed_resume.get("explicit_skills") or parsed_resume.get("skills") or [],
-        "inline_skills": parsed_resume.get("inline_skills", []),
-        "experience": parsed_resume.get("experience") or "",
-        "education": parsed_resume.get("education") or "",
-    }
-
-
 def _extract_semantic_score(result):
     """Unpacks percentage score whether compute_semantic_match_score returned a float or tuple."""
     return result[0] if isinstance(result, tuple) else result
 
+
 def match_resume_to_job(parsed_resume, job_description, job_title=None):
     """Main entry point. Returns a match score, explanation, and breakdown."""
-    standalone = get_active_trace() is None
-    trace = start_session("single_job_match", {"Job Title": job_title or "Untitled"}) if standalone else get_active_trace()
-    try:
-        _populate_trace_from_parsed_resume(trace, parsed_resume, source_type="single_job_match")
-        req_edu_level, req_edu_label = detect_required_education(job_description, job_title)
-        precomputed = precompute_resume_embeddings(parsed_resume)
+    req_edu_level, req_edu_label = detect_required_education(job_description, job_title)
+    precomputed = precompute_resume_embeddings(parsed_resume)
 
-        if req_edu_level > 0 and precomputed["edu_level"] < req_edu_level:
-            if trace is not None:
-                trace.excluded_jobs.append({
-                    "title": job_title or "Untitled",
-                    "company": "",
-                    "req_edu_level": req_edu_level,
-                    "req_edu_label": req_edu_label,
-                    "resume_edu_level": precomputed["edu_level"],
-                })
-            return {
-                "match_score": 0.0,
-                "comment": f"Not matched — this role requires {req_edu_label}.",
-                "breakdown": {"skills_score": 0.0, "experience_score": 0.0, "title_score": 0.0, "matched_skills": [],
-                              "semantic_score": 0.0, "ontology_score": None, "ontology_links": [],
-                              "ontology_confidence": 0.0},
-                "education_qualified": False,
-                "required_education": req_edu_label,
-            }
-
-        expanded_description = expand_job_description_with_occupation(job_title, job_description)
-        occ_trace = dict(_LAST_OCCUPATION_TRACE)
-        use_edu = req_edu_level > 0
-        segments = precomputed["resume_segments_with_edu"] if use_edu else precomputed["resume_segments"]
-        seg_emb = precomputed["segment_embeddings_with_edu"] if use_edu else precomputed["segment_embeddings"]
-
-        semantic_score = _extract_semantic_score(compute_semantic_match_score(
-            segments,
-            expanded_description,
-            precomputed_segment_embeddings=seg_emb
-        ))
-        sem_trace = dict(_LAST_SEMANTIC_TRACE)
-        ontology_score, ontology_links, ontology_confidence = compute_ontology_score(
-            precomputed["ontology_concepts"], extract_job_concepts(expanded_description)
-        )
-        onto_trace = dict(_LAST_ONTOLOGY_TRACE)
-        score = fuse_scores(semantic_score, ontology_score, ontology_confidence)
-        comment, _matched = generate_match_comment(score, precomputed["skills"], expanded_description)
-        comment += _ontology_comment(ontology_links)
-        breakdown = compute_breakdown_scores(
-            parsed_resume, expanded_description, job_title, precomputed_resume=precomputed
-        )
-        raw_cos = dict(_LAST_BREAKDOWN_COS)
-        breakdown["semantic_score"] = semantic_score
-        breakdown["ontology_score"] = ontology_score
-        breakdown["ontology_links"] = ontology_links
-        breakdown["ontology_confidence"] = ontology_confidence
-
-        if trace is not None:
-            eff_w = (ONTOLOGY_WEIGHT * ontology_confidence) if (ontology_score is not None and ontology_confidence > 0) else 0.0
-            trace.job_traces.append({
-                "title": job_title or "Untitled",
-                "company": "",
-                "source": "direct",
-                "req_edu_level": req_edu_level,
-                "req_edu_label": req_edu_label,
-                "use_edu": use_edu,
-                "occupation_match": occ_trace,
-                "semantic_score": semantic_score,
-                "semantic_details": sem_trace,
-                "ontology_score": ontology_score,
-                "ontology_confidence": ontology_confidence,
-                "ontology_details": onto_trace,
-                "fusion_details": {
-                    "ontology_weight_const": ONTOLOGY_WEIGHT,
-                    "confidence": ontology_confidence,
-                    "effective_weight": eff_w,
-                },
-                "final_score": score,
-                "relative_score": 100.0,
-                "breakdown": breakdown,
-                "raw_skills_cos": raw_cos["skills"],
-                "raw_exp_cos": raw_cos["exp"],
-                "raw_title_cos": raw_cos["title"],
-                "comment": comment,
-            })
-
+    if req_edu_level > 0 and precomputed["edu_level"] < req_edu_level:
         return {
-            "match_score": score,
-            "comment": comment,
-            "breakdown": breakdown,
-            "education_qualified": True,
+            "match_score": 0.0,
+            "comment": f"Not matched — this role requires {req_edu_label}.",
+            "breakdown": {"skills_score": 0.0, "experience_score": 0.0, "title_score": 0.0, "matched_skills": [],
+                          "semantic_score": 0.0, "ontology_score": None, "ontology_links": [],
+                          "ontology_confidence": 0.0},
+            "education_qualified": False,
             "required_education": req_edu_label,
         }
-    finally:
-        if standalone and trace is not None:
-            trace.mark_stage("single_job_match")
-            export_session_log(trace, get_engine_info())
-            end_session()
+
+    expanded_description = expand_job_description_with_occupation(job_title, job_description)
+    use_edu = req_edu_level > 0
+    segments = precomputed["resume_segments_with_edu"] if use_edu else precomputed["resume_segments"]
+    seg_emb = precomputed["segment_embeddings_with_edu"] if use_edu else precomputed["segment_embeddings"]
+
+    semantic_score = _extract_semantic_score(compute_semantic_match_score(
+        segments,
+        expanded_description,
+        precomputed_segment_embeddings=seg_emb
+    ))
+    ontology_score, ontology_links, ontology_confidence = compute_ontology_score(
+        precomputed["ontology_concepts"], extract_job_concepts(expanded_description)
+    )
+    score = fuse_scores(semantic_score, ontology_score, ontology_confidence)
+    comment, _matched = generate_match_comment(score, precomputed["skills"], expanded_description)
+    comment += _ontology_comment(ontology_links)
+    breakdown = compute_breakdown_scores(
+        parsed_resume, expanded_description, job_title, precomputed_resume=precomputed
+    )
+    breakdown["semantic_score"] = semantic_score
+    breakdown["ontology_score"] = ontology_score
+    breakdown["ontology_links"] = ontology_links
+    breakdown["ontology_confidence"] = ontology_confidence
+
+    return {
+        "match_score": score,
+        "comment": comment,
+        "breakdown": breakdown,
+        "education_qualified": True,
+        "required_education": req_edu_label,
+    }
 
 
 def rank_jobs_for_resume(parsed_resume, job_listings):
@@ -1574,139 +1274,74 @@ def rank_jobs_for_resume(parsed_resume, job_listings):
     Jobs that require a higher education level than the resume has are excluded,
     and jobs that require a degree include the resume's Education section in scoring.
     """
-    standalone = get_active_trace() is None
-    trace = start_session("rank_jobs_for_resume", {"Job Count": len(job_listings)}) if standalone else get_active_trace()
-    try:
-        _populate_trace_from_parsed_resume(trace, parsed_resume, source_type="rank_jobs_direct")
-        precomputed = precompute_resume_embeddings(parsed_resume)
-        if trace is not None:
-            trace.mark_stage("resume_encoding_and_ontology")
-        resume_segments = precomputed["resume_segments"]
-        segment_emb = precomputed["segment_embeddings"]
-        resume_segments_with_edu = precomputed["resume_segments_with_edu"]
-        segment_emb_with_edu = precomputed["segment_embeddings_with_edu"]
-        resume_edu_level = precomputed["edu_level"]
-        skills = precomputed["skills"]
+    precomputed = precompute_resume_embeddings(parsed_resume)
+    resume_segments = precomputed["resume_segments"]
+    segment_emb = precomputed["segment_embeddings"]
+    resume_segments_with_edu = precomputed["resume_segments_with_edu"]
+    segment_emb_with_edu = precomputed["segment_embeddings_with_edu"]
+    resume_edu_level = precomputed["edu_level"]
+    skills = precomputed["skills"]
 
-        results = []
-        job_trace_By_idx = {}
+    results = []
 
-        for idx, job in enumerate(job_listings):
-            req_edu_level, req_edu_label = detect_required_education(
-                job.get("description", ""), job.get("title", "")
-            )
-            # Exclude jobs requiring a higher education level than the candidate has
-            if req_edu_level > 0 and resume_edu_level < req_edu_level:
-                if trace is not None:
-                    trace.excluded_jobs.append({
-                        "title": job.get("title", "Untitled"),
-                        "company": job.get("company", ""),
-                        "req_edu_level": req_edu_level,
-                        "req_edu_label": req_edu_label,
-                        "resume_edu_level": resume_edu_level,
-                    })
-                continue
+    for job in job_listings:
+        req_edu_level, req_edu_label = detect_required_education(
+            job.get("description", ""), job.get("title", "")
+        )
+        # Exclude jobs requiring a higher education level than the candidate has
+        if req_edu_level > 0 and resume_edu_level < req_edu_level:
+            continue
 
-            expanded_description = expand_job_description_with_occupation(
-                job.get("title"), job["description"]
-            )
-            occ_trace = dict(_LAST_OCCUPATION_TRACE)
-            # Include education segments only when the job listing requires a degree
-            use_edu = req_edu_level > 0
-            semantic_score = _extract_semantic_score(compute_semantic_match_score(
-                resume_segments_with_edu if use_edu else resume_segments,
-                expanded_description,
-                precomputed_segment_embeddings=(segment_emb_with_edu if use_edu else segment_emb)
-            ))
-            sem_trace = dict(_LAST_SEMANTIC_TRACE)
-            ontology_score, ontology_links, ontology_confidence = compute_ontology_score(
-                precomputed["ontology_concepts"], extract_job_concepts(expanded_description)
-            )
-            onto_trace = dict(_LAST_ONTOLOGY_TRACE)
-            score = fuse_scores(semantic_score, ontology_score, ontology_confidence)
-            comment, _matched = generate_match_comment(
-                score, skills, expanded_description
-            )
-            comment += _ontology_comment(ontology_links)
-            breakdown = compute_breakdown_scores(
-                parsed_resume,
-                expanded_description,
-                job.get("title"),
-                precomputed_resume=precomputed
-            )
-            raw_cos = dict(_LAST_BREAKDOWN_COS)
-            breakdown["semantic_score"] = semantic_score
-            breakdown["ontology_score"] = ontology_score
-            breakdown["ontology_links"] = ontology_links
-            breakdown["ontology_confidence"] = ontology_confidence
-            res_entry = {
-                **job,
-                "match_score": score,
-                "comment": comment,
-                "breakdown": breakdown,
-                "required_education": req_edu_label,
-            }
-            results.append(res_entry)
+        expanded_description = expand_job_description_with_occupation(
+            job.get("title"), job["description"]
+        )
+        # Include education segments only when the job listing requires a degree
+        use_edu = req_edu_level > 0
+        semantic_score = _extract_semantic_score(compute_semantic_match_score(
+            resume_segments_with_edu if use_edu else resume_segments,
+            expanded_description,
+            precomputed_segment_embeddings=(segment_emb_with_edu if use_edu else segment_emb)
+        ))
+        ontology_score, ontology_links, ontology_confidence = compute_ontology_score(
+            precomputed["ontology_concepts"], extract_job_concepts(expanded_description)
+        )
+        score = fuse_scores(semantic_score, ontology_score, ontology_confidence)
+        comment, _matched = generate_match_comment(
+            score, skills, expanded_description
+        )
+        comment += _ontology_comment(ontology_links)
+        breakdown = compute_breakdown_scores(
+            parsed_resume,
+            expanded_description,
+            job.get("title"),
+            precomputed_resume=precomputed
+        )
+        breakdown["semantic_score"] = semantic_score
+        breakdown["ontology_score"] = ontology_score
+        breakdown["ontology_links"] = ontology_links
+        breakdown["ontology_confidence"] = ontology_confidence
+        results.append({
+            **job,
+            "match_score": score,
+            "comment": comment,
+            "breakdown": breakdown,
+            "required_education": req_edu_label,
+        })
 
-            if trace is not None:
-                eff_w = (ONTOLOGY_WEIGHT * ontology_confidence) if (ontology_score is not None and ontology_confidence > 0) else 0.0
-                jt_entry = {
-                    "title": job.get("title", "Untitled"),
-                    "company": job.get("company", ""),
-                    "source": job.get("source", ""),
-                    "req_edu_level": req_edu_level,
-                    "req_edu_label": req_edu_label,
-                    "use_edu": use_edu,
-                    "occupation_match": occ_trace,
-                    "semantic_score": semantic_score,
-                    "semantic_details": sem_trace,
-                    "ontology_score": ontology_score,
-                    "ontology_confidence": ontology_confidence,
-                    "ontology_details": onto_trace,
-                    "fusion_details": {
-                        "ontology_weight_const": ONTOLOGY_WEIGHT,
-                        "confidence": ontology_confidence,
-                        "effective_weight": eff_w,
-                    },
-                    "final_score": score,
-                    "relative_score": 50.0,
-                    "breakdown": breakdown,
-                    "raw_skills_cos": raw_cos["skills"],
-                    "raw_exp_cos": raw_cos["exp"],
-                    "raw_title_cos": raw_cos["title"],
-                    "comment": comment,
-                }
-                trace.job_traces.append(jt_entry)
-                job_trace_By_idx[id(res_entry)] = jt_entry
+    raw_scores = [r["match_score"] for r in results]
+    if raw_scores:
+        min_score, max_score = min(raw_scores), max(raw_scores)
+        score_range = max_score - min_score
 
-        raw_scores = [r["match_score"] for r in results]
-        if raw_scores:
-            min_score, max_score = min(raw_scores), max(raw_scores)
-            score_range = round(max_score - min_score, 2)
+        for r in results:
+            if score_range > 0.01:
+                r["relative_score"] = round((r["match_score"] - min_score) / score_range * 100, 1)
+            else:
+                r["relative_score"] = 50.0  # all jobs scored about the same
+    else:
+        return []
 
-            for r in results:
-                if score_range > 0.01:
-                    r["relative_score"] = round((r["match_score"] - min_score) / score_range * 100, 1)
-                else:
-                    r["relative_score"] = 50.0  # all jobs scored about the same
-                if id(r) in job_trace_By_idx:
-                    job_trace_By_idx[id(r)]["relative_score"] = r["relative_score"]
-
-            if trace is not None:
-                trace.ranking_summary = {
-                    "min_score": min_score,
-                    "max_score": max_score,
-                    "score_range": score_range,
-                }
-        else:
-            return []
-
-        return sorted(results, key=lambda r: r["match_score"], reverse=True)
-    finally:
-        if standalone and trace is not None:
-            trace.mark_stage("job_matching_and_ranking")
-            export_session_log(trace, get_engine_info())
-            end_session()
+    return sorted(results, key=lambda r: r["match_score"], reverse=True)
 
 
 
